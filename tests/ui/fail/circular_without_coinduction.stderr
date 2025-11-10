@@ -1,0 +1,39 @@
+error[E0275]: overflow evaluating the requirement `TypeA: CircularTrait`
+  --> tests/ui/fail/circular_without_coinduction.rs:17:9
+   |
+17 |         TypeB: super::CircularTrait,
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: required for `TypeB` to implement `CircularTrait`
+  --> tests/ui/fail/circular_without_coinduction.rs:23:10
+   |
+23 |     impl super::CircularTrait for TypeB
+   |          ^^^^^^^^^^^^^^^^^^^^     ^^^^^
+24 |     where
+25 |         TypeA: super::CircularTrait,
+   |                -------------------- unsatisfied trait bound introduced here
+   = help: see issue #48214
+help: add `#![feature(trivial_bounds)]` to the crate attributes to enable
+   |
+ 1 + #![feature(trivial_bounds)]
+   |
+
+error[E0275]: overflow evaluating the requirement `TypeB: CircularTrait`
+  --> tests/ui/fail/circular_without_coinduction.rs:25:9
+   |
+25 |         TypeA: super::CircularTrait,
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: required for `TypeA` to implement `CircularTrait`
+  --> tests/ui/fail/circular_without_coinduction.rs:15:10
+   |
+15 |     impl super::CircularTrait for TypeA
+   |          ^^^^^^^^^^^^^^^^^^^^     ^^^^^
+16 |     where
+17 |         TypeB: super::CircularTrait,
+   |                -------------------- unsatisfied trait bound introduced here
+   = help: see issue #48214
+help: add `#![feature(trivial_bounds)]` to the crate attributes to enable
+   |
+ 1 + #![feature(trivial_bounds)]
+   |

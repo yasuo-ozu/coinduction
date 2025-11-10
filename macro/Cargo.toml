@@ -1,0 +1,20 @@
+[package]
+name = "coinduction-macro"
+version = "0.1.0"
+edition = "2021"
+description = "Attribute macros for defining circular type references and recursive trait implementations in Rust"
+license = "MIT"
+
+[lib]
+proc-macro = true
+path = "lib.rs"
+
+[dependencies]
+proc-macro2 = "1.0"
+proc-macro-error = { version = "1.0", default-features = false }
+type-leak = "0.2.0"
+template-quote = "0.4.0"
+
+[dependencies.syn]
+version = "2.0"
+features = ["full", "derive", "printing", "extra-traits", "visit", "visit-mut"]

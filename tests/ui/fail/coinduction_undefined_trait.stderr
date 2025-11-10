@@ -1,0 +1,16 @@
+error: cannot find macro `UndefinedTrait` in this scope
+  --> tests/ui/fail/coinduction_undefined_trait.rs:10:22
+   |
+10 | #[coinduction(super::UndefinedTrait)]
+   |                      ^^^^^^^^^^^^^^
+   |
+   = note: `UndefinedTrait` is in scope, but it is a trait, not a macro
+
+error: cannot find macro `UndefinedTrait` in this scope
+  --> tests/ui/fail/coinduction_undefined_trait.rs:10:22
+   |
+10 | #[coinduction(super::UndefinedTrait)]
+   |                      ^^^^^^^^^^^^^^
+   |
+   = note: `UndefinedTrait` is in scope, but it is a trait, not a macro
+   = note: this error originates in the macro `this_trait_is_not_defined_with_coinduction_traitdef` which comes from the expansion of the attribute macro `coinduction` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -1,0 +1,13 @@
+error: expected `{}`, found `;`
+ --> tests/ui/fail/traitdef_missing_body.rs:5:18
+  |
+5 | trait MissingBody;
+  |                  ^
+  |
+  = help: try using `{}` instead
+
+error: expected curly braces
+ --> tests/ui/fail/traitdef_missing_body.rs:5:18
+  |
+5 | trait MissingBody;
+  |                  ^

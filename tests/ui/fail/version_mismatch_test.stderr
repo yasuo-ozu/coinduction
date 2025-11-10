@@ -1,0 +1,10 @@
+error: version of coinduction crate mismatch: 0.2.0 != 0.1.0
+  --> tests/ui/fail/version_mismatch_test.rs:3:1
+   |
+ 3 | #[traitdef]
+   | ^^^^^^^^^^^
+...
+11 |     TestTrait! { @version_check "0.2.0" };
+   |     ------------------------------------- in this macro invocation
+   |
+   = note: this error originates in the macro `TestTrait` (in Nightly builds, run with -Z macro-backtrace for more info)

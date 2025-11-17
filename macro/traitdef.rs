@@ -133,12 +133,12 @@ pub fn traitdef_impl(args: TokenStream, input: TokenStream) -> TokenStream {
         macro_rules! #temporal_mac_name {
             // Version check - accept correct version
             (@version_check #crate_version) => {};
-            
+
             // Version check - emit error for wrong version
             (@version_check $version:literal) => {
                 compile_error!(concat!("version of coinduction crate mismatch: ", $version, " != ", #crate_version));
             };
-            
+
             // Handle full target constraint form: (Type: Trait)
             (($module:item, $working_list:expr, $constraint_ty:ty: #trait_ident, $trait_names:expr, $graphs:expr)) => {
                 #temporal_mac_name! { $constraint_ty, $module, $working_list, $trait_names, $graphs }

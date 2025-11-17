@@ -1,7 +1,7 @@
-use proc_macro::TokenStream;
-use template_quote::quote;
-use syn::{parse_macro_input, ItemMod, Path, Item, ItemImpl};
 use crate::common::TypeConstraint;
+use proc_macro::TokenStream;
+use syn::{parse_macro_input, Item, ItemImpl, ItemMod, Path};
+use template_quote::quote;
 
 #[derive(Debug)]
 struct TypeDefArgs {
@@ -20,7 +20,7 @@ impl syn::parse::Parse for TypeDefArgs {
             if input.peek(syn::Ident) && input.peek2(syn::Token![=]) {
                 let name: syn::Ident = input.parse()?;
                 let _: syn::Token![=] = input.parse()?;
-                
+
                 if name == "coinduction" {
                     coinduction_path = input.parse()?;
                 } else if name == "marker" {
@@ -52,7 +52,11 @@ pub fn typedef_impl(args: TokenStream, input: TokenStream) -> TokenStream {
 
     let items = match &module.content {
         Some((_, items)) => items,
-        None => return syn::Error::new_spanned(module, "Module must have content").to_compile_error().into(),
+        None => {
+            return syn::Error::new_spanned(module, "Module must have content")
+                .to_compile_error()
+                .into()
+        }
     };
 
     // Only validate traits when explicitly provided as arguments
@@ -68,7 +72,7 @@ pub fn typedef_impl(args: TokenStream, input: TokenStream) -> TokenStream {
                         const _: () = {
                             // Version check
                             #trait_name! { @version_check #crate_version }
-                            
+
                             macro_rules! this_trait_is_not_defined_with_coinduction_traitdef {
                                 () => {
                                     #trait_name! { trait [#trait_path] is not defined with #[coinduction::traitdef] macro, so is not used as an argument for #[typedef] macro }
@@ -118,7 +122,7 @@ pub fn typedef_impl(args: TokenStream, input: TokenStream) -> TokenStream {
     }
 
     let coinduction_path = &args.coinduction_path;
-    
+
     // Generate TypeRef implementation if marker_path is provided
     let typeref_impl = if let Some(marker_path) = &args.marker_path {
         quote! {
@@ -133,11 +137,11 @@ pub fn typedef_impl(args: TokenStream, input: TokenStream) -> TokenStream {
     let result = quote! {
         // Validate all traits are defined with #[traitdef]
         #(#trait_validations)*
-        
+
         #module
-        
+
         #typeref_impl
-        
+
         #(#type_macros)*
     };
 
@@ -156,8 +160,12 @@ fn generate_type_macro(
         if let Item::Impl(impl_item) = item {
             if let Some((_, trait_path, _)) = &impl_item.trait_ {
                 // Check if this impl is for our type and target trait
-                if is_impl_for_type(impl_item, type_ident) && 
-                   args.trait_paths.iter().any(|tp| paths_equal(tp, trait_path)) {
+                if is_impl_for_type(impl_item, type_ident)
+                    && args
+                        .trait_paths
+                        .iter()
+                        .any(|tp| paths_equal(tp, trait_path))
+                {
                     // Extract constraints from this impl
                     if let Ok(constraints) = extract_impl_constraints(impl_item) {
                         impl_constraints.extend(constraints);
@@ -172,7 +180,7 @@ fn generate_type_macro(
     }
 
     let coinduction_path = &args.coinduction_path;
-    
+
     // Create a random identifier with __ prefix
     let random_suffix = std::process::id(); // Use process ID for uniqueness
     let temporal_mac_name = syn::Ident::new(
@@ -191,7 +199,7 @@ fn generate_type_macro(
                     $module, $working_list, $target_constraint, $trait_names, $graphs, vec![#(#impl_constraints),*]
                 }
             };
-            
+
             // Simple fallback for direct invocation
             ($target:ty) => {
                 #coinduction_path::__internal! {
@@ -208,11 +216,12 @@ fn generate_type_macro(
 
 fn is_impl_for_type(impl_item: &ItemImpl, type_ident: &syn::Ident) -> bool {
     match &*impl_item.self_ty {
-        syn::Type::Path(type_path) => {
-            type_path.path.segments.last()
-                .map(|seg| seg.ident == *type_ident)
-                .unwrap_or(false)
-        }
+        syn::Type::Path(type_path) => type_path
+            .path
+            .segments
+            .last()
+            .map(|seg| seg.ident == *type_ident)
+            .unwrap_or(false),
         _ => false,
     }
 }
@@ -256,13 +265,13 @@ fn extract_impl_constraints(impl_item: &ItemImpl) -> syn::Result<Vec<TypeConstra
     Ok(constraints)
 }
 
-
 fn paths_equal(a: &Path, b: &Path) -> bool {
     if a.segments.len() != b.segments.len() {
         return false;
     }
-    
-    a.segments.iter().zip(b.segments.iter()).all(|(seg_a, seg_b)| {
-        seg_a.ident == seg_b.ident
-    })
+
+    a.segments
+        .iter()
+        .zip(b.segments.iter())
+        .all(|(seg_a, seg_b)| seg_a.ident == seg_b.ident)
 }

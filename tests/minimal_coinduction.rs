@@ -131,10 +131,7 @@ mod enum_coinduction {
 
     pub enum ListNode<T> {
         Empty,
-        Node {
-            data: T,
-            next: Box<ListNode<T>>,
-        },
+        Node { data: T, next: Box<ListNode<T>> },
     }
 
     impl<T: std::fmt::Display> EnumTrait for TreeNode<T>

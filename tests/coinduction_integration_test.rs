@@ -1,6 +1,8 @@
 use coinduction::*;
-use traitdef::{TestTrait, LocalTrait, CircularTrait, TestMarker, LocalMarker, CoinductionTestMarker};
-use typedef::{TypedefMarker, LocalTypeMarker};
+use traitdef::{
+    CircularTrait, CoinductionTestMarker, LocalMarker, LocalTrait, TestMarker, TestTrait,
+};
+use typedef::{LocalTypeMarker, TypedefMarker};
 
 // Local types that exist only in this crate
 pub struct InternalType(pub f64);
@@ -14,8 +16,8 @@ pub trait CoinductionLocalTrait {
 #[coinduction]
 pub mod integration_circular {
     use super::*;
-    use traitdef::{CircularTrait, LocalTrait, TestTrait};
     use std::marker::PhantomData;
+    use traitdef::{CircularTrait, LocalTrait, TestTrait};
 
     // Define mutually recursive structures
     pub struct NodeA<T> {
@@ -146,7 +148,7 @@ impl CoinductionLocalTrait for InternalType {
 #[test]
 fn test_traitdef_marker_typeref() {
     use coinduction::TypeRef;
-    
+
     // Test that TypeRef implementation is generated for traitdef marker
     let _: <TestMarker as TypeRef<String>>::Type = String::new();
 }
@@ -154,7 +156,7 @@ fn test_traitdef_marker_typeref() {
 #[test]
 fn test_typedef_marker_typeref() {
     use coinduction::TypeRef;
-    
+
     // Test that TypeRef implementation is generated for typedef marker
     let _: <TypedefMarker as TypeRef<i32>>::Type = 42i32;
 }
@@ -171,7 +173,7 @@ fn test_basic_functionality() {
 fn test_circular_coinduction() {
     use integration_circular::*;
     use std::marker::PhantomData;
-    
+
     // Test circular structures with coinduction
     let node_a = NodeA::<()> {
         value: "Test Node A".to_string(),
@@ -240,10 +242,10 @@ fn test_complex_circular_references() {
 
 #[test]
 fn test_typeref_with_complex_types() {
-    use integration_circular::*;
     use coinduction::TypeRef;
+    use integration_circular::*;
     use std::marker::PhantomData;
-    
+
     // Test TypeRef implementations with complex types from coinduction
     let _: <CoinductionTestMarker as TypeRef<NodeA<()>>>::Type = NodeA::<()> {
         value: "test".to_string(),
@@ -258,7 +260,7 @@ fn test_typeref_with_complex_types() {
 fn test_circular_types_usage() {
     // Test using CircularA and CircularB imports
     use typedef::circular_types::{CircularA, CircularB};
-    
+
     let circular_a = CircularA {
         data: "test circular A".to_string(),
         reference_b: None,
@@ -280,10 +282,10 @@ fn test_circular_types_usage() {
 
 #[test]
 fn test_typeref_direct_usage() {
-    use integration_circular::*;
     use coinduction::TypeRef;
+    use integration_circular::*;
     use std::marker::PhantomData;
-    
+
     // Test direct TypeRef usage with various markers
     let _: <TestMarker as TypeRef<String>>::Type = String::from("test");
     let _: <LocalMarker as TypeRef<NodeB<()>>>::Type = NodeB::<()> {

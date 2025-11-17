@@ -1,11 +1,11 @@
 use proc_macro::TokenStream;
 
+mod coinduction;
 mod common;
+mod finalize;
+mod internal;
 mod traitdef;
 mod typedef;
-mod coinduction;
-mod internal;
-mod finalize;
 
 #[proc_macro_attribute]
 pub fn traitdef(args: TokenStream, input: TokenStream) -> TokenStream {

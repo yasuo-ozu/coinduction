@@ -205,7 +205,7 @@ pub use coinduction_macro::traitdef;
 /// #[typedef(crate::my_mod::MyTrait)]     // Qualified path, matches: impl crate::my_mod::MyTrait
 /// ```
 ///
-/// **Important**: The macro uses literal token matching - `MyTrait` and `super::MyTrait` 
+/// **Important**: The macro uses literal token matching - `MyTrait` and `super::MyTrait`
 /// are treated as different paths even if they resolve to the same trait.
 ///
 /// ## Example

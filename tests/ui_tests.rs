@@ -2,7 +2,7 @@
 fn ui_fail_tests() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/ui/fail/circular_without_coinduction.rs");
-    t.compile_fail("tests/ui/fail/traitdef_missing_body.rs"); 
+    t.compile_fail("tests/ui/fail/traitdef_missing_body.rs");
     t.compile_fail("tests/ui/fail/traitdef_on_struct.rs");
     t.compile_fail("tests/ui/fail/typedef_on_function.rs");
     t.compile_fail("tests/ui/fail/coinduction_on_struct.rs");

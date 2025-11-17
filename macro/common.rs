@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
-use template_quote::{quote, ToTokens};
 use syn::{parse::Parse, punctuated::Punctuated, Path, Token, Type};
+use template_quote::{quote, ToTokens};
 
 struct TarjanState {
     index_counter: usize,
@@ -69,7 +69,6 @@ impl ConstraintGraph {
         self.edges.push((from, to));
     }
 
-
     pub fn constraints(&self) -> impl Iterator<Item = &TypeConstraint> {
         self.constraints.iter()
     }
@@ -79,14 +78,14 @@ impl ConstraintGraph {
     }
 
     pub fn find_constraint(&self, target: &TypeConstraint) -> Option<usize> {
-        self.constraints.iter().position(|constraint| {
-            constraints_match(constraint, target)
-        })
+        self.constraints
+            .iter()
+            .position(|constraint| constraints_match(constraint, target))
     }
 
-
     pub fn neighbors(&self, node_id: usize) -> impl Iterator<Item = usize> + '_ {
-        self.edges.iter()
+        self.edges
+            .iter()
             .filter(move |(from, _)| *from == node_id)
             .map(|(_, to)| *to)
     }
@@ -149,18 +148,18 @@ impl ConstraintGraph {
 impl Parse for ConstraintGraph {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let mut graph = ConstraintGraph::new();
-        
+
         if input.is_empty() {
             return Ok(graph);
         }
 
-        let constraints: Punctuated<TypeConstraint, Token![,]> = 
+        let constraints: Punctuated<TypeConstraint, Token![,]> =
             input.parse_terminated(TypeConstraint::parse, Token![,])?;
-        
+
         for constraint in constraints {
             graph.add_constraint(constraint);
         }
-        
+
         Ok(graph)
     }
 }
@@ -168,7 +167,7 @@ impl Parse for ConstraintGraph {
 impl ToTokens for ConstraintGraph {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let constraints: Vec<_> = self.constraints().cloned().collect();
-        tokens.extend(quote! { 
+        tokens.extend(quote! {
             vec![#(#constraints),*]
         });
     }
@@ -180,4 +179,3 @@ pub fn constraints_match(constraint1: &TypeConstraint, constraint2: &TypeConstra
     // In a more sophisticated implementation, this would handle type unification
     format!("{}", quote! { #constraint1 }) == format!("{}", quote! { #constraint2 })
 }
-

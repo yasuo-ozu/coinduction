@@ -1,5 +1,5 @@
 use coinduction::typedef;
-use traitdef::{TestTrait, LocalTrait, CircularTrait};
+use traitdef::{CircularTrait, LocalTrait, TestTrait};
 
 pub struct TypedefMarker;
 pub struct LocalTypeMarker;
@@ -71,10 +71,10 @@ impl ConstraintTrait for HelperType {
 #[typedef(TestTrait, marker = TypedefMarker)]
 pub mod test_types {
     use super::*;
-    
+
     pub struct TestStruct(pub String);
-    
-    impl TestTrait for TestStruct 
+
+    impl TestTrait for TestStruct
     where
         LocalType: ConstraintTrait,
         HelperType: ConstraintTrait,
@@ -90,18 +90,18 @@ pub mod test_types {
 #[typedef(LocalTrait, CircularTrait, marker = LocalTypeMarker)]
 pub mod circular_types {
     use super::*;
-    
+
     pub struct CircularA {
         pub data: String,
         pub reference_b: Option<Box<CircularB>>,
     }
-    
+
     pub struct CircularB {
         pub value: i32,
         pub reference_a: Option<Box<CircularA>>,
     }
-    
-    impl LocalTrait for CircularA 
+
+    impl LocalTrait for CircularA
     where
         LocalType: ConstraintTrait,
         (): TraitRef<ConstraintType, CloneRef>,
@@ -113,8 +113,8 @@ pub mod circular_types {
             self.data.len()
         }
     }
-    
-    impl LocalTrait for CircularB 
+
+    impl LocalTrait for CircularB
     where
         HelperType: ConstraintTrait,
         LocalType: ConstraintTrait,
@@ -125,8 +125,8 @@ pub mod circular_types {
             self.value as usize
         }
     }
-    
-    impl CircularTrait for CircularA 
+
+    impl CircularTrait for CircularA
     where
         LocalType: ConstraintTrait,
         HelperType: ConstraintTrait,
@@ -137,11 +137,14 @@ pub mod circular_types {
         CircularB: LocalTrait,
     {
         fn circular_method(&self) -> Box<dyn CircularTrait> {
-            Box::new(CircularB { value: 42, reference_a: None })
+            Box::new(CircularB {
+                value: 42,
+                reference_a: None,
+            })
         }
     }
-    
-    impl CircularTrait for CircularB 
+
+    impl CircularTrait for CircularB
     where
         LocalType: ConstraintTrait,
         HelperType: ConstraintTrait,
@@ -153,7 +156,10 @@ pub mod circular_types {
         CircularA: LocalTrait,
     {
         fn circular_method(&self) -> Box<dyn CircularTrait> {
-            Box::new(CircularA { data: "circular".to_string(), reference_b: None })
+            Box::new(CircularA {
+                data: "circular".to_string(),
+                reference_b: None,
+            })
         }
     }
 }

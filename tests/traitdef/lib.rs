@@ -15,7 +15,7 @@ pub trait TestTrait {
     fn test_method(&self) -> String;
 }
 
-#[traitdef(marker = LocalMarker)]  
+#[traitdef(marker = LocalMarker)]
 pub trait CircularTrait {
     fn circular_method(&self) -> Box<dyn CircularTrait>;
 }

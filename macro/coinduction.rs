@@ -1,10 +1,10 @@
-use proc_macro::TokenStream;
-use template_quote::quote;
-use syn::{
-    parse_macro_input, GenericParam, Generics, ItemImpl, ItemMod,
-    Path, Type, WherePredicate, TypeParamBound,
-};
 use crate::common::{ConstraintGraph, TypeConstraint};
+use proc_macro::TokenStream;
+use syn::{
+    parse_macro_input, GenericParam, Generics, ItemImpl, ItemMod, Path, Type, TypeParamBound,
+    WherePredicate,
+};
+use template_quote::quote;
 
 #[derive(Debug)]
 struct CoinductionArgs {
@@ -23,9 +23,7 @@ impl syn::parse::Parse for CoinductionArgs {
             }
         }
 
-        Ok(CoinductionArgs {
-            trait_paths,
-        })
+        Ok(CoinductionArgs { trait_paths })
     }
 }
 
@@ -37,7 +35,11 @@ pub fn coinduction_impl(args: TokenStream, input: TokenStream) -> TokenStream {
     // Ensure module has content
     let items = match &mut module.content {
         Some((_, items)) => items,
-        None => return syn::Error::new_spanned(module, "Module must have content").to_compile_error().into(),
+        None => {
+            return syn::Error::new_spanned(module, "Module must have content")
+                .to_compile_error()
+                .into()
+        }
     };
 
     // Only validate traits when explicitly provided as arguments
@@ -53,7 +55,7 @@ pub fn coinduction_impl(args: TokenStream, input: TokenStream) -> TokenStream {
                         const _: () = {
                             // Version check
                             #trait_name! { @version_check #crate_version }
-                            
+
                             macro_rules! this_trait_is_not_defined_with_coinduction_traitdef {
                                 () => {
                                     #trait_name! { trait [#trait_path] is not defined with #[coinduction::traitdef] macro, so is not used as an argument for #[coinduction] macro }
@@ -81,7 +83,11 @@ pub fn coinduction_impl(args: TokenStream, input: TokenStream) -> TokenStream {
         if let syn::Item::Impl(impl_item) = item {
             if let Some((_, trait_path, _)) = &impl_item.trait_ {
                 // Check if this trait is in our arguments
-                if args.trait_paths.iter().any(|tp| paths_equal(tp, trait_path)) {
+                if args
+                    .trait_paths
+                    .iter()
+                    .any(|tp| paths_equal(tp, trait_path))
+                {
                     match process_impl_block(impl_item, &args.trait_paths) {
                         Ok((graph, constraints)) => {
                             graphs.push(graph);
@@ -95,17 +101,12 @@ pub fn coinduction_impl(args: TokenStream, input: TokenStream) -> TokenStream {
     }
 
     // Remove duplicates from working list
-    working_list.sort_by(|a, b| {
-        format!("{}", quote! { #a }).cmp(&format!("{}", quote! { #b }))
-    });
-    working_list.dedup_by(|a, b| {
-        format!("{}", quote! { #a }) == format!("{}", quote! { #b })
-    });
-
+    working_list.sort_by(|a, b| format!("{}", quote! { #a }).cmp(&format!("{}", quote! { #b })));
+    working_list.dedup_by(|a, b| format!("{}", quote! { #a }) == format!("{}", quote! { #b }));
 
     // Apply coinduction directly in the coinduction macro
     let mut modified_module = module.clone();
-    
+
     // Apply coinduction processing to the module
     if let Some((_, ref mut items)) = modified_module.content {
         for item in items.iter_mut() {
@@ -115,12 +116,12 @@ pub fn coinduction_impl(args: TokenStream, input: TokenStream) -> TokenStream {
             }
         }
     }
-    
+
     // Generate the final result - trait validations and modified module
     let result = quote! {
         // Validate all traits are defined with #[traitdef]
         #(#trait_validations)*
-        
+
         #modified_module
     };
 
@@ -128,8 +129,8 @@ pub fn coinduction_impl(args: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 fn process_impl_block(
-    impl_item: &ItemImpl, 
-    trait_paths: &[Path]
+    impl_item: &ItemImpl,
+    trait_paths: &[Path],
 ) -> syn::Result<(ConstraintGraph, Vec<TypeConstraint>)> {
     let mut graph = ConstraintGraph::new();
     let mut constraints = Vec::new();
@@ -148,7 +149,7 @@ fn process_impl_block(
         _ => {
             return Err(syn::Error::new_spanned(
                 &impl_item.self_ty,
-                "Self type must be a path"
+                "Self type must be a path",
             ));
         }
     }
@@ -162,14 +163,17 @@ fn process_impl_block(
 
     // Process constraints from generics and where clause
     let all_constraints = extract_constraints(&impl_item.generics)?;
-    
+
     for constraint in all_constraints {
         let constraint_id = graph.add_constraint(constraint.clone());
         // Connect constraint to root (dependency relationship)
         graph.add_edge(root_id, constraint_id);
-        
+
         // Add to working list if trait matches our arguments
-        if trait_paths.iter().any(|tp| paths_equal(tp, &constraint.trait_path)) {
+        if trait_paths
+            .iter()
+            .any(|tp| paths_equal(tp, &constraint.trait_path))
+        {
             constraints.push(constraint);
         }
     }
@@ -218,14 +222,13 @@ fn extract_constraints(generics: &Generics) -> syn::Result<Vec<TypeConstraint>> 
     Ok(constraints)
 }
 
-
 fn paths_equal(a: &Path, b: &Path) -> bool {
     if a.segments.len() != b.segments.len() {
         return false;
     }
-    
-    a.segments.iter().zip(b.segments.iter()).all(|(seg_a, seg_b)| {
-        seg_a.ident == seg_b.ident
-    })
-}
 
+    a.segments
+        .iter()
+        .zip(b.segments.iter())
+        .all(|(seg_a, seg_b)| seg_a.ident == seg_b.ident)
+}

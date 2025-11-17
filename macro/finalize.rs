@@ -1,7 +1,7 @@
+use crate::common::{constraints_match, ConstraintGraph, TypeConstraint};
 use proc_macro::TokenStream;
+use syn::{parse_macro_input, ItemImpl, ItemMod};
 use template_quote::quote;
-use syn::{parse_macro_input, ItemMod, ItemImpl};
-use crate::common::{ConstraintGraph, TypeConstraint, constraints_match};
 
 #[derive(Debug)]
 struct FinalizeArgs {
@@ -13,7 +13,7 @@ impl syn::parse::Parse for FinalizeArgs {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let module: ItemMod = input.parse()?;
         let _: syn::Token![,] = input.parse()?;
-        
+
         // Parse graphs
         let content;
         syn::bracketed!(content in input);
@@ -31,9 +31,9 @@ impl syn::parse::Parse for FinalizeArgs {
 
 pub fn finalize_impl(input: TokenStream) -> TokenStream {
     let args = parse_macro_input!(input as FinalizeArgs);
-    
+
     let mut modified_module = args.module;
-    
+
     // Process each item in the module
     if let Some(ref mut items) = modified_module.content {
         for item in &mut items.1 {
@@ -49,42 +49,49 @@ pub fn finalize_impl(input: TokenStream) -> TokenStream {
     result.into()
 }
 
-fn find_matching_graph<'a>(graphs: &'a [ConstraintGraph], impl_item: &ItemImpl) -> Option<&'a ConstraintGraph> {
+fn find_matching_graph<'a>(
+    graphs: &'a [ConstraintGraph],
+    impl_item: &ItemImpl,
+) -> Option<&'a ConstraintGraph> {
     // Find a graph that has a constraint matching this impl block's self type and trait
     if let Some((_, trait_path, _)) = &impl_item.trait_ {
         let self_constraint = TypeConstraint {
             ty: (*impl_item.self_ty).clone(),
             trait_path: trait_path.clone(),
         };
-        
+
         for graph in graphs {
             // Check if this graph has a constraint that matches
-            if graph.constraints().any(|constraint| constraints_match(constraint, &self_constraint)) {
+            if graph
+                .constraints()
+                .any(|constraint| constraints_match(constraint, &self_constraint))
+            {
                 return Some(graph);
             }
         }
     }
-    
+
     None
 }
 
 fn modify_impl_block(impl_item: &mut ItemImpl, graph: &ConstraintGraph) {
     // Find strongly connected components (cycles) in the constraint graph
     let sccs = graph.find_strongly_connected_components();
-    
+
     // Find cycles (SCCs with more than one node)
     let cycles: Vec<_> = sccs.into_iter().filter(|scc| scc.len() > 1).collect();
-    
+
     if cycles.is_empty() {
         return; // No cycles, nothing to modify
     }
-    
+
     // Get all constraints that are part of cycles
-    let cyclic_constraints: std::collections::HashSet<usize> = cycles.iter().flatten().copied().collect();
-    
+    let cyclic_constraints: std::collections::HashSet<usize> =
+        cycles.iter().flatten().copied().collect();
+
     // Remove constraints that are part of cycles from where clause
     remove_cyclic_constraints_from_generics(&mut impl_item.generics, graph, &cyclic_constraints);
-    
+
     // Add leaf constraints (constraints that are not part of cycles but are reachable from cycles)
     add_leaf_constraints_to_generics(&mut impl_item.generics, graph, &cyclic_constraints);
 }
@@ -94,7 +101,6 @@ fn remove_cyclic_constraints_from_generics(
     graph: &ConstraintGraph,
     cyclic_constraints: &std::collections::HashSet<usize>,
 ) {
-    
     // Remove cyclic bounds from generic parameters
     for param in &mut generics.params {
         if let syn::GenericParam::Type(type_param) = param {
@@ -108,13 +114,13 @@ fn remove_cyclic_constraints_from_generics(
                         }),
                         trait_path: trait_bound.path.clone(),
                     };
-                    
+
                     // Keep the bound if it's not part of a cycle
                     !is_constraint_in_cycle(graph, &constraint, cyclic_constraints)
                 } else {
                     true // Keep non-trait bounds
                 };
-                
+
                 if keep_bound {
                     new_bounds.push(bound.clone());
                 }
@@ -122,7 +128,7 @@ fn remove_cyclic_constraints_from_generics(
             type_param.bounds = new_bounds;
         }
     }
-    
+
     // Remove cyclic predicates from where clause
     if let Some(where_clause) = &mut generics.where_clause {
         let mut new_predicates = syn::punctuated::Punctuated::new();
@@ -135,18 +141,18 @@ fn remove_cyclic_constraints_from_generics(
                             ty: type_predicate.bounded_ty.clone(),
                             trait_path: trait_bound.path.clone(),
                         };
-                        
+
                         // Keep the bound if it's not part of a cycle
                         !is_constraint_in_cycle(graph, &constraint, cyclic_constraints)
                     } else {
                         true // Keep non-trait bounds
                     };
-                    
+
                     if keep_bound {
                         new_bounds.push(bound.clone());
                     }
                 }
-                
+
                 // Keep the predicate if it has any bounds left
                 if !new_bounds.is_empty() {
                     let mut new_predicate = type_predicate.clone();
@@ -157,7 +163,7 @@ fn remove_cyclic_constraints_from_generics(
             } else {
                 true // Keep non-type predicates
             };
-            
+
             if keep_predicate {
                 new_predicates.push(predicate.clone());
             }
@@ -173,7 +179,7 @@ fn add_leaf_constraints_to_generics(
 ) {
     // Find leaf constraints (reachable from cycles but not part of cycles)
     let mut leaf_constraints = Vec::new();
-    
+
     for &cyclic_node in cyclic_constraints {
         for neighbor in graph.neighbors(cyclic_node) {
             if !cyclic_constraints.contains(&neighbor) {
@@ -183,7 +189,7 @@ fn add_leaf_constraints_to_generics(
             }
         }
     }
-    
+
     // Add leaf constraints to where clause
     if !leaf_constraints.is_empty() {
         // Ensure we have a where clause
@@ -193,7 +199,7 @@ fn add_leaf_constraints_to_generics(
                 predicates: syn::punctuated::Punctuated::new(),
             });
         }
-        
+
         if let Some(where_clause) = &mut generics.where_clause {
             for constraint in leaf_constraints {
                 let predicate = syn::WherePredicate::Type(syn::PredicateType {
@@ -211,7 +217,7 @@ fn add_leaf_constraints_to_generics(
                         bounds
                     },
                 });
-                
+
                 where_clause.predicates.push(predicate);
             }
         }
@@ -229,5 +235,3 @@ fn is_constraint_in_cycle(
         false
     }
 }
-
-

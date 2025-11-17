@@ -38,25 +38,25 @@ trait Serialize<T> {
 mod compute_types {
     pub struct FastProcessor<T>(pub T);
     pub struct SlowProcessor<T>(pub T);
-    
+
     impl<T: Clone> super::Compute<T> for FastProcessor<T> {
         type Output = T;
         fn compute(&self, input: T) -> Self::Output {
             input
         }
     }
-    
+
     impl<T: Clone> super::Process for FastProcessor<T> {
         fn process(&self) {}
     }
-    
+
     impl<T: Clone + Default> super::Compute<T> for SlowProcessor<T> {
         type Output = T;
         fn compute(&self, input: T) -> Self::Output {
             input
         }
     }
-    
+
     impl<T: Clone + Default> super::Process for SlowProcessor<T> {
         fn process(&self) {}
     }
@@ -65,40 +65,40 @@ mod compute_types {
 #[typedef(super::Cache, super::Serialize)]
 mod storage_types {
     use std::collections::HashMap;
-    
+
     pub struct MemoryCache<K, V> {
         pub data: HashMap<K, V>,
     }
-    
+
     pub struct DiskCache<K, V> {
         pub path: String,
         pub _phantom: std::marker::PhantomData<(K, V)>,
     }
-    
+
     impl<K: Clone + Eq + std::hash::Hash, V: Clone> super::Cache<K, V> for MemoryCache<K, V> {
         fn get(&self, key: K) -> Option<V> {
             self.data.get(&key).cloned()
         }
-        
+
         fn put(&self, _key: K, _value: V) {
             // Implementation would modify self, but we'll keep it simple
         }
     }
-    
+
     impl<K: Clone, V: Clone> super::Serialize<(K, V)> for MemoryCache<K, V> {
         fn serialize(&self, _data: (K, V)) -> Vec<u8> {
             vec![1, 2, 3] // Simplified serialization
         }
     }
-    
+
     impl<K: Clone, V: Clone> super::Cache<K, V> for DiskCache<K, V> {
         fn get(&self, _key: K) -> Option<V> {
             None // Simplified implementation
         }
-        
+
         fn put(&self, _key: K, _value: V) {}
     }
-    
+
     impl<K, V> super::Serialize<(K, V)> for DiskCache<K, V> {
         fn serialize(&self, _data: (K, V)) -> Vec<u8> {
             vec![4, 5, 6] // Simplified serialization
@@ -111,25 +111,25 @@ mod validation_types {
     pub struct EmailValidator;
     pub struct NumberValidator<T>(pub T);
     pub struct DataTransformer<T>(pub T);
-    
+
     impl super::Validate<String> for EmailValidator {
         fn validate(&self, data: String) -> bool {
             data.contains('@')
         }
     }
-    
+
     impl super::Transform<String, bool> for EmailValidator {
         fn transform(&self, from: String) -> bool {
             from.len() > 5
         }
     }
-    
+
     impl<T: PartialOrd + Clone> super::Validate<T> for NumberValidator<T> {
         fn validate(&self, data: T) -> bool {
             data >= self.0
         }
     }
-    
+
     impl<T: Clone + std::fmt::Display> super::Transform<T, String> for DataTransformer<T> {
         fn transform(&self, from: T) -> String {
             format!("{}", from)
@@ -139,9 +139,16 @@ mod validation_types {
 
 // Complex coinduction module with multiple traits and additional constraints
 // Now using types from #[typedef] modules in where clauses
-#[coinduction(super::Compute, super::Process, super::Validate, super::Transform, super::Cache, super::Serialize)]
+#[coinduction(
+    super::Compute,
+    super::Process,
+    super::Validate,
+    super::Transform,
+    super::Cache,
+    super::Serialize
+)]
 mod complex_coinduction {
-    
+
     pub struct ProcessorA<T>(pub T);
     pub struct ProcessorB<T>(pub T);
     pub struct ProcessorC<T>(pub T);
@@ -298,7 +305,7 @@ fn test_complex_coinduction() {
 
     let computed = processor_c.compute(vec![4, 5]);
     assert_eq!(computed, vec![4, 5]);
-    
+
     let transformed = processor_c.transform(vec![1, 2]);
     assert_eq!(transformed, vec![vec![1, 2]]);
 
@@ -344,7 +351,7 @@ fn test_multi_trait_implementations() {
     // ProcessorC implements both Compute and Transform
     let computed_c = processor_c.compute(100);
     assert_eq!(computed_c, 100);
-    
+
     let transformed_c = processor_c.transform(50);
     assert_eq!(transformed_c, vec![50]);
 
@@ -359,7 +366,7 @@ fn test_typedef_compute_types() {
     let result = fast_proc.compute(100);
     assert_eq!(result, 100);
     fast_proc.process();
-    
+
     // Test SlowProcessor
     let slow_proc = compute_types::SlowProcessor(String::from("test"));
     let result = slow_proc.compute(String::from("hello"));
@@ -370,34 +377,34 @@ fn test_typedef_compute_types() {
 #[test]
 fn test_typedef_storage_types() {
     use std::collections::HashMap;
-    
+
     // Test MemoryCache
     let mut data = HashMap::new();
     data.insert("key1".to_string(), 42i32);
     let memory_cache = storage_types::MemoryCache { data };
-    
+
     let value = memory_cache.get("key1".to_string());
     assert_eq!(value, Some(42));
-    
+
     memory_cache.put("key2".to_string(), 100);
-    
+
     let serialized = memory_cache.serialize(("key1".to_string(), 42));
     assert_eq!(serialized, vec![1, 2, 3]);
-    
+
     // Test DiskCache
     let disk_cache = storage_types::DiskCache {
         path: "/tmp/cache".to_string(),
         _phantom: std::marker::PhantomData::<(String, i32)>,
     };
-    
+
     // Verify the path field is accessible
     assert_eq!(disk_cache.path, "/tmp/cache");
-    
+
     let value = disk_cache.get("key1".to_string());
     assert_eq!(value, None);
-    
+
     disk_cache.put("key1".to_string(), 42);
-    
+
     let serialized = disk_cache.serialize(("key1".to_string(), 42));
     assert_eq!(serialized, vec![4, 5, 6]);
 }
@@ -408,18 +415,18 @@ fn test_typedef_validation_types() {
     let email_validator = validation_types::EmailValidator;
     assert!(email_validator.validate("test@example.com".to_string()));
     assert!(!email_validator.validate("invalid-email".to_string()));
-    
+
     let transform_result = email_validator.transform("test@example.com".to_string());
     assert!(transform_result); // length > 5
-    
+
     let short_transform = email_validator.transform("hi".to_string());
     assert!(!short_transform); // length <= 5
-    
+
     // Test NumberValidator
     let num_validator = validation_types::NumberValidator(10);
     assert!(num_validator.validate(15)); // 15 >= 10
     assert!(!num_validator.validate(5)); // 5 < 10
-    
+
     // Test DataTransformer
     let transformer = validation_types::DataTransformer(42);
     let result = transformer.transform(123);

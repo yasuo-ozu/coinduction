@@ -23,8 +23,34 @@ impl PatternRule {
         let mut constraints = Vec::new();
 
         while !input.is_empty() {
-            let constraint = input.parse::<TypeConstraint>()?;
-            constraints.push(constraint);
+            // Parse meta-variable or regular type
+            let ty = if input.peek(syn::Token![$]) {
+                // Parse meta-variable like $a
+                let _: syn::Token![$] = input.parse()?;
+                let ident: syn::Ident = input.parse()?;
+                syn::Type::Path(syn::TypePath {
+                    qself: None,
+                    path: ident.into(),
+                })
+            } else {
+                input.parse::<syn::Type>()?
+            };
+            
+            let _: syn::Token![:] = input.parse()?;
+            
+            // Parse trait path (first trait)
+            let trait_path: syn::Path = input.parse()?;
+            constraints.push(TypeConstraint { ty: ty.clone(), trait_path });
+            
+            // Parse additional traits separated by +
+            while input.peek(syn::Token![+]) {
+                let _: syn::Token![+] = input.parse()?;
+                let additional_trait: syn::Path = input.parse()?;
+                constraints.push(TypeConstraint { 
+                    ty: ty.clone(), 
+                    trait_path: additional_trait 
+                });
+            }
 
             if !input.is_empty() {
                 let _: syn::Token![,] = input.parse()?;
@@ -53,20 +79,41 @@ impl syn::parse::Parse for TraitDefArgs {
                 } else {
                     return Err(syn::Error::new_spanned(name, "Unknown argument"));
                 }
-            } else if input.peek(syn::token::Paren) || input.peek(syn::token::Bracket) {
-                // Parse pattern => { constraints }
-                // Support patterns like ($t1:ty, $t2:ty) => {$t1: MyTrait1, $t2: MyTrait2}
-                let pattern = input.parse::<proc_macro2::TokenStream>()?;
-                let _: syn::Token![=>] = input.parse()?;
+            } else {
+                // Parse multiple patterns separated by commas
+                while !input.is_empty() {
+                    // Parse pattern => { constraints }
+                    let pattern = if input.peek(syn::token::Paren) {
+                        let content;
+                        syn::parenthesized!(content in input);
+                        content.parse::<proc_macro2::TokenStream>()?
+                    } else if input.peek(syn::token::Dollar) {
+                        // Parse simple pattern like $a:ty
+                        let mut tokens = proc_macro2::TokenStream::new();
+                        while !input.peek(syn::Token![=>]) && !input.is_empty() {
+                            tokens.extend(std::iter::once(input.parse::<proc_macro2::TokenTree>()?));
+                        }
+                        tokens
+                    } else {
+                        break;
+                    };
+                    
+                    let _: syn::Token![=>] = input.parse()?;
 
-                let content;
-                syn::braced!(content in input);
-                let constraints = PatternRule::parse_pattern_constraints(&content)?;
+                    let content;
+                    syn::braced!(content in input);
+                    let constraints = PatternRule::parse_pattern_constraints(&content)?;
 
-                patterns.push(PatternRule {
-                    pattern,
-                    constraints,
-                });
+                    patterns.push(PatternRule {
+                        pattern,
+                        constraints,
+                    });
+                    
+                    // Check for comma separator
+                    if !input.is_empty() {
+                        let _: syn::Token![,] = input.parse()?;
+                    }
+                }
             }
 
             if !input.is_empty() {
@@ -101,12 +148,14 @@ pub fn traitdef_impl(args: TokenStream, input: TokenStream) -> TokenStream {
         let pattern = &rule.pattern;
         let constraints = &rule.constraints;
 
+        // Extract the pattern and create a proper macro_rules! arm
+        let pattern_tokens = pattern.clone();
         quote! {
-            (#pattern, $module:item, $working_list:expr, $trait_names:expr, $graphs:expr) => {
+            #pattern_tokens => {
                 #coinduction_path::__internal! {
-                    $module, $working_list, (), $trait_names, $graphs, vec![#(#constraints),*]
+                    mod empty {}, vec![], (), vec![], vec![], vec![#(#constraints),*]
                 }
-            }
+            };
         }
     });
 

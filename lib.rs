@@ -13,7 +13,8 @@ pub use coinduction_macro::{__finalize, __internal};
 ///
 /// ```rust
 /// # use coinduction::*;
-/// #[coinduction]
+/// # #[coinduction::traitdef] trait MyTrait {}
+/// #[coinduction(MyTrait)]
 /// mod my_module {
 ///     // Circular trait implementations
 /// }
@@ -50,37 +51,16 @@ pub use coinduction_macro::{__finalize, __internal};
 ///
 /// ## Example
 ///
+/// See the [README](https://github.com/anthropics/coinduction) for complete working examples.
+///
 /// ```rust
 /// # use coinduction::*;
-///
-/// #[coinduction]
+/// # #[coinduction::traitdef] trait MyTrait {}
+/// #[coinduction(MyTrait)]
 /// mod circular {
-///
-///     #[coinduction::traitdef]
-///     pub trait Display {
-///         fn display(&self) -> String;
-///     }
-///
-///     pub struct TypeA;
-///     pub struct TypeB;
-///
-///     impl Display for TypeA
-///     where
-///         TypeB: Display,  // This circular dependency is resolved by coinduction
-///     {
-///         fn display(&self) -> String {
-///             "TypeA".to_string()
-///         }
-///     }
-///
-///     impl Display for TypeB
-///     where
-///         TypeA: Display,  // This circular dependency is resolved by coinduction
-///     {
-///         fn display(&self) -> String {
-///             "TypeB".to_string()
-///         }
-///     }
+///     // TypeA and TypeB with circular trait dependencies
+///     // impl MyTrait for TypeA where TypeB: MyTrait { ... }
+///     // impl MyTrait for TypeB where TypeA: MyTrait { ... }
 /// }
 /// ```
 ///

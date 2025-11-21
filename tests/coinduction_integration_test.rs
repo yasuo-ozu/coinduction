@@ -13,7 +13,7 @@ pub trait CoinductionLocalTrait {
     fn coinduction_method(&self) -> f64;
 }
 
-#[coinduction]
+#[coinduction(TestTrait, LocalTrait, CircularTrait, CoinductionLocalTrait)]
 pub mod integration_circular {
     use super::*;
     use std::marker::PhantomData;

@@ -1,3 +1,4 @@
+#![feature(trivial_bounds)]
 use coinduction::*;
 
 // Define multiple traits for complex coinduction testing
@@ -148,6 +149,7 @@ mod validation_types {
     super::Serialize
 )]
 mod complex_coinduction {
+    use std::fmt::Debug;
 
     pub struct ProcessorA<T>(pub T);
     pub struct ProcessorB<T>(pub T);

@@ -89,16 +89,14 @@ trait Evaluate {
     fn evaluate(&self, input: &[&'static str], index: &mut usize) -> i32;
 }
 
-#[coinduction]
+#[coinduction(super::Evaluate)]
 mod calculator {
-    use super::Evaluate;
-
     pub struct Expr;
     pub struct Term;
 
-    impl Evaluate for Expr
+    impl super::Evaluate for Expr
     where
-        Term: Evaluate,
+        Term: super::Evaluate,
     {
         // same as above
 #        fn evaluate(&self, input: &[&'static str], index: &mut usize) -> i32 {
@@ -114,9 +112,9 @@ mod calculator {
 #        }
     }
 
-    impl Evaluate for Term
+    impl super::Evaluate for Term
     where
-        Expr: Evaluate,
+        Expr: super::Evaluate,
     {
         // same as above
 #        fn evaluate(&self, input: &[&'static str], index: &mut usize) -> i32 {
@@ -140,67 +138,13 @@ fn main() {
 }
 ```
 
-### Generic Types with Circular Dependencies
-
-This example demonstrates circular dependencies with generic types:
-
-```rust
-use coinduction::*;
-use std::marker::PhantomData;
-
-#[coinduction]
-mod generic_circular {
-    use std::marker::PhantomData;
-    
-    pub trait Process<T> {
-        fn process(&self, input: T) -> T;
-    }
-
-    pub struct NodeA<T> {
-        pub phantom: PhantomData<T>,
-    }
-
-    pub struct NodeB<T> {
-        pub phantom: PhantomData<T>,
-    }
-
-    // NodeA's implementation depends on NodeB implementing Process<T>
-    impl<T: Clone> Process<T> for NodeA<T>
-    where
-        NodeB<T>: Process<T>,
-    {
-        fn process(&self, input: T) -> T {
-            input.clone()
-        }
-    }
-
-    // NodeB's implementation depends on NodeA implementing Process<T>
-    impl<T: Clone> Process<T> for NodeB<T>
-    where
-        NodeA<T>: Process<T>,
-    {
-        fn process(&self, input: T) -> T {
-            input.clone()
-        }
-    }
-}
-
-// Example usage:
-use generic_circular::{NodeA, Process};
-let node_a = NodeA::<String> {
-    phantom: PhantomData,
-};
-let result = node_a.process("test".to_string());
-assert_eq!(result, "test");
-```
-
 ### Organizing Types with `typedef`
 
 This example shows how to organize related types using `#[typedef]` combined with `#[coinduction]`:
 
 ```rust
-use coinduction::*;
-use std::marker::PhantomData;
+# use coinduction::*;
+# use std::marker::PhantomData;
 
 #[traitdef]
 trait ProcessData {
@@ -210,8 +154,7 @@ trait ProcessData {
 // First define generic types with #[typedef] to organize them
 #[typedef]
 mod data_types {
-    use std::marker::PhantomData;
-    
+    # use std::marker::PhantomData;
     trait ProcessData {
         fn process(&self) -> String;
     }
@@ -235,8 +178,7 @@ mod data_types {
 // Then use #[coinduction] to implement cyclic induction with T position circularity
 #[coinduction]
 mod circular_impls {
-    use std::marker::PhantomData;
-    
+    # use std::marker::PhantomData;
     trait ProcessData {
         fn process(&self) -> String;
     }

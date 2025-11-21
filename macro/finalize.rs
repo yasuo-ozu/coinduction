@@ -115,8 +115,8 @@ fn remove_cyclic_constraints_from_generics(
                         trait_path: trait_bound.path.clone(),
                     };
 
-                    // Keep the bound if it's not part of a cycle
-                    !is_constraint_in_cycle(graph, &constraint, cyclic_constraints)
+                    // Keep the bound if it's not part of a cycle or if it's an additional constraint
+                    !is_constraint_directly_in_cycle(graph, &constraint, cyclic_constraints)
                 } else {
                     true // Keep non-trait bounds
                 };
@@ -142,8 +142,8 @@ fn remove_cyclic_constraints_from_generics(
                             trait_path: trait_bound.path.clone(),
                         };
 
-                        // Keep the bound if it's not part of a cycle
-                        !is_constraint_in_cycle(graph, &constraint, cyclic_constraints)
+                        // Keep the bound if it's not part of a cycle or if it's an additional constraint
+                        !is_constraint_directly_in_cycle(graph, &constraint, cyclic_constraints)
                     } else {
                         true // Keep non-trait bounds
                     };
@@ -224,14 +224,17 @@ fn add_leaf_constraints_to_generics(
     }
 }
 
-fn is_constraint_in_cycle(
+fn is_constraint_directly_in_cycle(
     graph: &ConstraintGraph,
     constraint: &TypeConstraint,
     cyclic_constraints: &std::collections::HashSet<usize>,
 ) -> bool {
+    // Only remove constraints that are exactly found in the graph and part of cycles
+    // This preserves additional type bounds that aren't part of circular dependencies
     if let Some(node_id) = graph.find_constraint(constraint) {
         cyclic_constraints.contains(&node_id)
     } else {
+        // If the constraint is not in the graph, it's an additional constraint and should be kept
         false
     }
 }

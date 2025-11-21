@@ -1,3 +1,4 @@
+#![feature(trivial_bounds)]
 use coinduction::*;
 use std::marker::PhantomData;
 
@@ -81,7 +82,7 @@ fn test_trait_macro_generation() {
 // }
 
 // Module with generic structs having type parameters and circular implementations
-#[coinduction(super::GenericTrait<T>)]
+#[coinduction(GenericTrait)]
 mod generic_coinduction {
     use super::*;
 
@@ -117,7 +118,7 @@ mod generic_coinduction {
 }
 
 // Module with enums having type parameters and circular implementations
-#[coinduction(super::EnumTrait)]
+#[coinduction(EnumTrait)]
 mod enum_coinduction {
     use super::*;
 

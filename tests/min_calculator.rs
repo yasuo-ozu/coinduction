@@ -1,3 +1,4 @@
+#![feature(trivial_bounds)]
 use coinduction::*;
 
 #[traitdef]
@@ -5,7 +6,7 @@ trait Evaluate {
     fn evaluate(&self, input: &[&'static str], index: &mut usize) -> i32;
 }
 
-#[coinduction]
+#[coinduction(Evaluate)]
 mod calculator {
     use super::Evaluate;
 

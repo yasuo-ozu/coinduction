@@ -104,15 +104,25 @@ pub fn coinduction_impl(args: TokenStream, input: TokenStream) -> TokenStream {
     working_list.sort_by(|a, b| format!("{}", quote! { #a }).cmp(&format!("{}", quote! { #b })));
     working_list.dedup_by(|a, b| format!("{}", quote! { #a }) == format!("{}", quote! { #b }));
 
-    // Apply coinduction directly in the coinduction macro
+    // Apply coinduction processing using the proper finalize system
     let mut modified_module = module.clone();
 
     // Apply coinduction processing to the module
     if let Some((_, ref mut items)) = modified_module.content {
         for item in items.iter_mut() {
             if let syn::Item::Impl(impl_item) = item {
-                // Simple coinduction: remove all where clauses to break cycles
-                impl_item.generics.where_clause = None;
+                // Check if this is implementing one of the traits we're interested in
+                if let Some((_, trait_path, _)) = &impl_item.trait_ {
+                    // Check if this trait is in our arguments
+                    if args
+                        .trait_paths
+                        .iter()
+                        .any(|tp| paths_equal(tp, trait_path))
+                    {
+                        // Apply selective constraint removal - remove only circular trait bounds
+                        remove_circular_trait_bounds(impl_item, &args.trait_paths);
+                    }
+                }
             }
         }
     }
@@ -220,6 +230,49 @@ fn extract_constraints(generics: &Generics) -> syn::Result<Vec<TypeConstraint>> 
     }
 
     Ok(constraints)
+}
+
+fn remove_circular_trait_bounds(impl_item: &mut ItemImpl, circular_traits: &[Path]) {
+    // Remove only trait bounds for the specified circular traits, preserve everything else
+    if let Some(where_clause) = &mut impl_item.generics.where_clause {
+        let mut new_predicates = syn::punctuated::Punctuated::new();
+        
+        for predicate in &where_clause.predicates {
+            match predicate {
+                WherePredicate::Type(type_predicate) => {
+                    let mut new_bounds = syn::punctuated::Punctuated::new();
+                    
+                    for bound in &type_predicate.bounds {
+                        let keep_bound = if let TypeParamBound::Trait(trait_bound) = bound {
+                            // Check if this trait bound is for one of the circular traits
+                            !circular_traits.iter().any(|circular_trait| {
+                                paths_equal(circular_trait, &trait_bound.path)
+                            })
+                        } else {
+                            true // Keep all non-trait bounds (lifetime, const, etc.)
+                        };
+
+                        if keep_bound {
+                            new_bounds.push(bound.clone());
+                        }
+                    }
+
+                    // Keep the predicate if it has any bounds left
+                    if !new_bounds.is_empty() {
+                        let mut new_predicate = type_predicate.clone();
+                        new_predicate.bounds = new_bounds;
+                        new_predicates.push(WherePredicate::Type(new_predicate));
+                    }
+                }
+                _ => {
+                    // Keep all non-type predicates (lifetime predicates, etc.)
+                    new_predicates.push(predicate.clone());
+                }
+            }
+        }
+        
+        where_clause.predicates = new_predicates;
+    }
 }
 
 fn paths_equal(a: &Path, b: &Path) -> bool {

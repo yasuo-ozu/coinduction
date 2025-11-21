@@ -1,3 +1,4 @@
+#![feature(trivial_bounds)]
 use coinduction::*;
 
 #[coinduction::traitdef]
@@ -5,7 +6,7 @@ pub trait Display {
     fn display(&self) -> String;
 }
 
-#[coinduction]
+#[coinduction(Display)]
 mod circular {
 
     use super::Display;

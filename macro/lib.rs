@@ -4,6 +4,8 @@ mod coinduction;
 mod common;
 mod finalize;
 mod internal;
+mod matching;
+mod solver;
 mod traitdef;
 mod typedef;
 
@@ -22,6 +24,7 @@ pub fn coinduction(args: TokenStream, input: TokenStream) -> TokenStream {
     coinduction::coinduction_impl(args, input)
 }
 
+// TODO: rename to `__traitdef_internal`
 #[proc_macro]
 pub fn __internal(input: TokenStream) -> TokenStream {
     internal::internal_impl(input)

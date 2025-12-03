@@ -33,14 +33,19 @@ pub fn coinduction_impl(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut module = parse_macro_input!(input as ItemMod);
 
     // Ensure module has content
+    // TODO: use unwrap_or_else
     let items = match &mut module.content {
         Some((_, items)) => items,
         None => {
+            // TODO: use proc_macro_error crate (abort!)
             return syn::Error::new_spanned(module, "Module must have content")
                 .to_compile_error()
-                .into()
+                .into();
         }
     };
+
+    // TODO: define new trait_paths collecting all traits implemented in the #[coinduction] module
+    // then the args.trait_paths is empty
 
     // Only validate traits when explicitly provided as arguments
     // Auto-detected traits don't need validation since they're defined in the same module
@@ -54,7 +59,12 @@ pub fn coinduction_impl(args: TokenStream, input: TokenStream) -> TokenStream {
                     Some(quote! {
                         const _: () = {
                             // Version check
-                            #trait_name! { @version_check #crate_version }
+                            macro_rules! coinduction_crate_version_mismatch {
+                                () => {
+                                    #trait_name! { @version_check #crate_version }
+                                };
+                            }
+                            coinduction_crate_version_mismatch!();
 
                             macro_rules! this_trait_is_not_defined_with_coinduction_traitdef {
                                 () => {
@@ -65,9 +75,11 @@ pub fn coinduction_impl(args: TokenStream, input: TokenStream) -> TokenStream {
                         };
                     })
                 } else {
+                    // TODO: we should make it as error
                     None
                 }
             } else {
+                // TODO: we should make it as error
                 None
             }
         }).collect()
@@ -105,9 +117,11 @@ pub fn coinduction_impl(args: TokenStream, input: TokenStream) -> TokenStream {
     working_list.dedup_by(|a, b| format!("{}", quote! { #a }) == format!("{}", quote! { #b }));
 
     // Apply coinduction processing using the proper finalize system
+    // TODO: remove this
     let mut modified_module = module.clone();
 
     // Apply coinduction processing to the module
+    // TODO: the block is not needed
     if let Some((_, ref mut items)) = modified_module.content {
         for item in items.iter_mut() {
             if let syn::Item::Impl(impl_item) = item {
@@ -132,12 +146,16 @@ pub fn coinduction_impl(args: TokenStream, input: TokenStream) -> TokenStream {
         // Validate all traits are defined with #[traitdef]
         #(#trait_validations)*
 
+        // TODO: do not emit the module. instead, find the first trait in working list if exists
+        // and call that path regarding as a macro. The macro is defined in traitdef.rs using
+        // macro_rules!
         #modified_module
     };
 
     result.into()
 }
 
+// TODO: add arg for all ItemImpls within the #[coinduction] module
 fn process_impl_block(
     impl_item: &ItemImpl,
     trait_paths: &[Path],
@@ -146,10 +164,12 @@ fn process_impl_block(
     let mut constraints = Vec::new();
 
     // Validate Self type is just one path segment
+    // TODO: use `if let ... = ... {} else {}`
     match &*impl_item.self_ty {
         Type::Path(type_path) => {
             if type_path.path.segments.len() != 1 {
                 let path_str = quote! { #type_path }.to_string();
+                // TODO use abort! from proc_macro_error
                 return Err(syn::Error::new_spanned(
                     &impl_item.self_ty,
                     format!("{} is not defined in the same module\nhint: Self type must be a single path segment", path_str)
@@ -157,9 +177,10 @@ fn process_impl_block(
             }
         }
         _ => {
+            // TODO use abort! from proc_macro_error
             return Err(syn::Error::new_spanned(
                 &impl_item.self_ty,
-                "Self type must be a path",
+                "Self type of impl blocks in #[coinduction] module must be a path",
             ));
         }
     }
@@ -169,6 +190,7 @@ fn process_impl_block(
         ty: (*impl_item.self_ty).clone(),
         trait_path: impl_item.trait_.as_ref().unwrap().1.clone(),
     };
+    // TODO: do not clone
     let root_id = graph.set_root(self_constraint.clone());
 
     // Process constraints from generics and where clause
@@ -191,6 +213,7 @@ fn process_impl_block(
     Ok((graph, constraints))
 }
 
+// TODO:  change the reference to mutable
 fn extract_constraints(generics: &Generics) -> syn::Result<Vec<TypeConstraint>> {
     let mut constraints = Vec::new();
 
@@ -200,6 +223,7 @@ fn extract_constraints(generics: &Generics) -> syn::Result<Vec<TypeConstraint>> 
             // Separate multiple trait bounds (T: Trait1 + Trait2 becomes T: Trait1, T: Trait2)
             for bound in &type_param.bounds {
                 if let TypeParamBound::Trait(trait_bound) = bound {
+                    // TODO: remove the constraint from generics
                     constraints.push(TypeConstraint {
                         ty: Type::Path(syn::TypePath {
                             qself: None,
@@ -219,6 +243,7 @@ fn extract_constraints(generics: &Generics) -> syn::Result<Vec<TypeConstraint>> 
                 // Separate multiple trait bounds in where clause
                 for bound in &type_predicate.bounds {
                     if let TypeParamBound::Trait(trait_bound) = bound {
+                        // TODO: remove the constraint from generics
                         constraints.push(TypeConstraint {
                             ty: type_predicate.bounded_ty.clone(),
                             trait_path: trait_bound.path.clone(),
@@ -236,12 +261,12 @@ fn remove_circular_trait_bounds(impl_item: &mut ItemImpl, circular_traits: &[Pat
     // Remove only trait bounds for the specified circular traits, preserve everything else
     if let Some(where_clause) = &mut impl_item.generics.where_clause {
         let mut new_predicates = syn::punctuated::Punctuated::new();
-        
+
         for predicate in &where_clause.predicates {
             match predicate {
                 WherePredicate::Type(type_predicate) => {
                     let mut new_bounds = syn::punctuated::Punctuated::new();
-                    
+
                     for bound in &type_predicate.bounds {
                         let keep_bound = if let TypeParamBound::Trait(trait_bound) = bound {
                             // Check if this trait bound is for one of the circular traits
@@ -270,7 +295,7 @@ fn remove_circular_trait_bounds(impl_item: &mut ItemImpl, circular_traits: &[Pat
                 }
             }
         }
-        
+
         where_clause.predicates = new_predicates;
     }
 }

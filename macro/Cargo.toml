@@ -14,6 +14,7 @@ proc-macro2 = "1.0"
 proc-macro-error = { version = "1.0", default-features = false }
 type-leak = "0.2.0"
 template-quote = "0.4.0"
+gotgraph = "0.2.0"
 
 [dependencies.syn]
 version = "2.0"

@@ -35,20 +35,23 @@ impl PatternRule {
             } else {
                 input.parse::<syn::Type>()?
             };
-            
+
             let _: syn::Token![:] = input.parse()?;
-            
+
             // Parse trait path (first trait)
             let trait_path: syn::Path = input.parse()?;
-            constraints.push(TypeConstraint { ty: ty.clone(), trait_path });
-            
+            constraints.push(TypeConstraint {
+                ty: ty.clone(),
+                trait_path,
+            });
+
             // Parse additional traits separated by +
             while input.peek(syn::Token![+]) {
                 let _: syn::Token![+] = input.parse()?;
                 let additional_trait: syn::Path = input.parse()?;
-                constraints.push(TypeConstraint { 
-                    ty: ty.clone(), 
-                    trait_path: additional_trait 
+                constraints.push(TypeConstraint {
+                    ty: ty.clone(),
+                    trait_path: additional_trait,
                 });
             }
 
@@ -91,13 +94,14 @@ impl syn::parse::Parse for TraitDefArgs {
                         // Parse simple pattern like $a:ty
                         let mut tokens = proc_macro2::TokenStream::new();
                         while !input.peek(syn::Token![=>]) && !input.is_empty() {
-                            tokens.extend(std::iter::once(input.parse::<proc_macro2::TokenTree>()?));
+                            tokens
+                                .extend(std::iter::once(input.parse::<proc_macro2::TokenTree>()?));
                         }
                         tokens
                     } else {
                         break;
                     };
-                    
+
                     let _: syn::Token![=>] = input.parse()?;
 
                     let content;
@@ -108,7 +112,7 @@ impl syn::parse::Parse for TraitDefArgs {
                         pattern,
                         constraints,
                     });
-                    
+
                     // Check for comma separator
                     if !input.is_empty() {
                         let _: syn::Token![,] = input.parse()?;
@@ -150,6 +154,10 @@ pub fn traitdef_impl(args: TokenStream, input: TokenStream) -> TokenStream {
 
         // Extract the pattern and create a proper macro_rules! arm
         let pattern_tokens = pattern.clone();
+
+        // TODO: use internal::InternalArgs to generate the arguments
+        // TODO: accept working_list, ... as addition to the pattern_tokens
+
         quote! {
             #pattern_tokens => {
                 #coinduction_path::__internal! {

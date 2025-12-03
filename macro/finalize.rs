@@ -1,7 +1,7 @@
 use crate::common::{constraints_match, ConstraintGraph, TypeConstraint};
 use proc_macro::TokenStream;
 use syn::{parse_macro_input, ItemImpl, ItemMod};
-use template_quote::quote;
+use template_quote::{quote, ToTokens};
 
 #[derive(Debug)]
 struct FinalizeArgs {
@@ -26,6 +26,16 @@ impl syn::parse::Parse for FinalizeArgs {
         }
 
         Ok(FinalizeArgs { module, graphs })
+    }
+}
+
+impl ToTokens for FinalizeArgs {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        let module = &self.module;
+        let graphs = &self.graphs;
+        tokens.extend(quote! {
+            #module, [#(#graphs),*]
+        });
     }
 }
 
@@ -236,5 +246,287 @@ fn is_constraint_directly_in_cycle(
     } else {
         // If the constraint is not in the graph, it's an additional constraint and should be kept
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use syn::{parse_quote, ItemMod};
+    use template_quote::quote;
+
+    fn create_test_module() -> ItemMod {
+        parse_quote! {
+            mod test_mod {
+                impl<T> Clone for T where T: Copy {
+                    fn clone(&self) -> Self {
+                        *self
+                    }
+                }
+            }
+        }
+    }
+
+    fn create_test_constraint_graph() -> ConstraintGraph {
+        let mut graph = ConstraintGraph::new();
+
+        let constraint1 = TypeConstraint {
+            ty: parse_quote!(T),
+            trait_path: parse_quote!(Clone),
+        };
+        let constraint2 = TypeConstraint {
+            ty: parse_quote!(T),
+            trait_path: parse_quote!(Copy),
+        };
+
+        let node1 = graph.add_constraint(constraint1);
+        let node2 = graph.add_constraint(constraint2);
+        graph.add_edge(node1, node2);
+        graph.add_edge(node2, node1); // Create a cycle
+
+        graph
+    }
+
+    #[test]
+    fn test_finalize_args_to_tokens() {
+        let module = create_test_module();
+        let graphs = vec![create_test_constraint_graph()];
+
+        let args = FinalizeArgs { module, graphs };
+        let tokens = quote! { #args };
+
+        // The output should contain the module and the graphs in brackets
+        let output = tokens.to_string();
+        assert!(output.contains("mod test_mod"));
+        assert!(output.contains("Clone"));
+        assert!(output.contains("Copy"));
+    }
+
+    fn finalize_impl_internal(args: FinalizeArgs) -> proc_macro2::TokenStream {
+        let mut modified_module = args.module;
+
+        // Process each item in the module
+        if let Some(ref mut items) = modified_module.content {
+            for item in &mut items.1 {
+                if let syn::Item::Impl(impl_item) = item {
+                    if let Some(graph) = find_matching_graph(&args.graphs, impl_item) {
+                        modify_impl_block(impl_item, graph);
+                    }
+                }
+            }
+        }
+
+        quote! { #modified_module }
+    }
+
+    #[test]
+    fn test_finalize_impl_with_no_cycles() {
+        let module = parse_quote! {
+            mod test_mod {
+                impl<T> Display for T where T: Debug {
+                    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                        write!(f, "{:?}", self)
+                    }
+                }
+            }
+        };
+
+        let mut graph = ConstraintGraph::new();
+        graph.add_constraint(TypeConstraint {
+            ty: parse_quote!(T),
+            trait_path: parse_quote!(Debug),
+        });
+
+        let args = FinalizeArgs {
+            module,
+            graphs: vec![graph],
+        };
+
+        let output = finalize_impl_internal(args);
+
+        // Should return the module unchanged since there are no cycles
+        let output_str = output.to_string();
+        assert!(output_str.contains("impl < T > Display for T where T : Debug"));
+    }
+
+    #[test]
+    fn test_finalize_impl_with_cycles() {
+        let module = parse_quote! {
+            mod test_mod {
+                impl<T> Clone for T where T: Copy, T: Clone {
+                    fn clone(&self) -> Self {
+                        *self
+                    }
+                }
+            }
+        };
+
+        let mut graph = ConstraintGraph::new();
+        let constraint1 = TypeConstraint {
+            ty: parse_quote!(T),
+            trait_path: parse_quote!(Clone),
+        };
+        let constraint2 = TypeConstraint {
+            ty: parse_quote!(T),
+            trait_path: parse_quote!(Copy),
+        };
+
+        let node1 = graph.add_constraint(constraint1);
+        let node2 = graph.add_constraint(constraint2);
+        graph.add_edge(node1, node2);
+        graph.add_edge(node2, node1); // Create a cycle
+
+        let args = FinalizeArgs {
+            module,
+            graphs: vec![graph],
+        };
+
+        let output = finalize_impl_internal(args);
+
+        // The cyclic constraints should be removed/modified
+        let output_str = output.to_string();
+        assert!(output_str.contains("impl"));
+        assert!(output_str.contains("Clone"));
+    }
+
+    #[test]
+    fn test_find_matching_graph() {
+        let impl_item: ItemImpl = parse_quote! {
+            impl<T> Clone for T where T: Copy {}
+        };
+
+        let graph = create_test_constraint_graph();
+        let graphs = vec![graph];
+
+        let result = find_matching_graph(&graphs, &impl_item);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_find_matching_graph_no_match() {
+        let impl_item: ItemImpl = parse_quote! {
+            impl<T> Display for T where T: Debug {}
+        };
+
+        let graph = create_test_constraint_graph();
+        let graphs = vec![graph];
+
+        let result = find_matching_graph(&graphs, &impl_item);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_coinduction_module_with_complex_dependencies() {
+        let module = parse_quote! {
+            #[coinduction]
+            mod complex_recursive {
+                struct Wrapper<T>(T);
+                struct Wrapper2<T>(T);
+
+                impl<A, B> Clone for (A, B) 
+                where 
+                    A: Clone,
+                    B: Clone,
+                    Wrapper<A>: Copy,
+                    Wrapper2<B>: Send
+                {
+                    fn clone(&self) -> Self {
+                        (self.0.clone(), self.1.clone())
+                    }
+                }
+
+                impl<T> Copy for Wrapper<T> 
+                where 
+                    T: Copy,
+                    (T, Wrapper2<T>): Clone,
+                    Wrapper2<T>: Sync
+                {
+                }
+
+                impl<T> Send for Wrapper2<T> 
+                where 
+                    T: Send,
+                    Wrapper<T>: Copy,
+                    (Wrapper<T>, T): Clone
+                {
+                }
+
+                impl<T> Sync for Wrapper2<T> 
+                where 
+                    T: Sync,
+                    Wrapper<T>: Send,
+                    (T, T): Clone
+                {
+                }
+            }
+        };
+
+        // Create constraint graphs representing the circular dependencies
+        let mut graph1 = ConstraintGraph::new();
+        
+        // Constraints for tuple Clone impl
+        let tuple_clone = TypeConstraint {
+            ty: parse_quote!((A, B)),
+            trait_path: parse_quote!(Clone),
+        };
+        let wrapper_copy = TypeConstraint {
+            ty: parse_quote!(Wrapper<A>),
+            trait_path: parse_quote!(Copy),
+        };
+        let wrapper2_send = TypeConstraint {
+            ty: parse_quote!(Wrapper2<B>),
+            trait_path: parse_quote!(Send),
+        };
+
+        let node1 = graph1.add_constraint(tuple_clone);
+        let node2 = graph1.add_constraint(wrapper_copy);
+        let node3 = graph1.add_constraint(wrapper2_send);
+
+        // Create circular dependencies
+        graph1.add_edge(node1, node2); // tuple Clone -> Wrapper Copy
+        graph1.add_edge(node2, node3); // Wrapper Copy -> Wrapper2 Send
+        graph1.add_edge(node3, node1); // Wrapper2 Send -> tuple Clone
+
+        let mut graph2 = ConstraintGraph::new();
+        
+        // More complex circular dependencies with Wrapper types
+        let wrapper_copy2 = TypeConstraint {
+            ty: parse_quote!(Wrapper<T>),
+            trait_path: parse_quote!(Copy),
+        };
+        let wrapper2_sync = TypeConstraint {
+            ty: parse_quote!(Wrapper2<T>),
+            trait_path: parse_quote!(Sync),
+        };
+        let tuple_clone2 = TypeConstraint {
+            ty: parse_quote!((T, Wrapper2<T>)),
+            trait_path: parse_quote!(Clone),
+        };
+
+        let node4 = graph2.add_constraint(wrapper_copy2);
+        let node5 = graph2.add_constraint(wrapper2_sync);
+        let node6 = graph2.add_constraint(tuple_clone2);
+
+        // Create another cycle
+        graph2.add_edge(node4, node5); // Wrapper Copy -> Wrapper2 Sync
+        graph2.add_edge(node5, node6); // Wrapper2 Sync -> tuple Clone
+        graph2.add_edge(node6, node4); // tuple Clone -> Wrapper Copy
+
+        let args = FinalizeArgs {
+            module,
+            graphs: vec![graph1, graph2],
+        };
+
+        let output = finalize_impl_internal(args);
+        
+        // The output should contain the modified module with processed cycles
+        let output_str = output.to_string();
+        assert!(output_str.contains("mod complex_recursive"));
+        assert!(output_str.contains("impl"));
+        assert!(output_str.contains("Wrapper"));
+        assert!(output_str.contains("Wrapper2"));
+        
+        // Should contain tuple types
+        assert!(output_str.contains("("));
     }
 }

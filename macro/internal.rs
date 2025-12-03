@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use syn::{parse_macro_input, Path};
 use template_quote::quote;
 
+// TODO: implement ToTokens
 #[derive(Debug)]
 struct InternalArgs {
     module: syn::ItemMod,

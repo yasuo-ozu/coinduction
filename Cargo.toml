@@ -1,0 +1,23 @@
+[package]
+name = "coinduction"
+version = "0.1.0"
+edition = "2021"
+description = "Attribute macros for defining circular type references and recursive trait implementations in Rust"
+license = "MIT"
+repository = "https://github.com/yasuo-ozu/coinduction"
+keywords = ["macro", "trait", "recursive", "circular", "zerocost"]
+categories = ["rust-patterns", "development-tools::procedural-macro-helpers"]
+authors = ["yasuo-ozu"]
+
+[dependencies]
+coinduction-macro = { path = "./macro", version = "0.1.0" }
+
+[dev-dependencies]
+trybuild = "1.0"
+
+[lib]
+path = "lib.rs"
+
+[workspace]
+members = ["macro", "."]
+resolver = "2"

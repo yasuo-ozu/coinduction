@@ -7,10 +7,24 @@ use syn::punctuated::Punctuated;
 use syn::*;
 use template_quote::{quote, ToTokens};
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug)]
 pub struct Constraint {
     pub typ: Type,
     pub trait_path: Path,
+}
+
+impl PartialEq for Constraint {
+    fn eq(&self, other: &Self) -> bool {
+        quote!(#self).to_string() == quote!(#other).to_string()
+    }
+}
+
+impl Eq for Constraint {}
+
+impl std::hash::Hash for Constraint {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        quote!(#self).to_string().hash(state);
+    }
 }
 
 impl Constraint {

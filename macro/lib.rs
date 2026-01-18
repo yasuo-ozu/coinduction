@@ -37,20 +37,6 @@ fn remove_path_args(path: &Path) -> NoArgPath {
     NoArgPath(new_path)
 }
 
-fn remove_generic_bounds(param: GenericParam) -> GenericParam {
-    match param {
-        GenericParam::Type(mut type_param) => {
-            type_param.bounds.clear();
-            GenericParam::Type(type_param)
-        }
-        GenericParam::Lifetime(mut lifetime_param) => {
-            lifetime_param.bounds.clear();
-            GenericParam::Lifetime(lifetime_param)
-        }
-        o => o,
-    }
-}
-
 /// Try to parse `coinduction = <path>` as the first argument
 /// Returns coinduction path, defaults to `::coinduction`
 fn try_parse_coinduction_args(input: ParseStream) -> syn::Result<NoArgPath> {

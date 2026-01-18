@@ -119,7 +119,7 @@ mod coinduction_mod {
 
     use super::*;
 
-    struct RecA<T>(Option<RecB<T>>, core::marker::PhantomData<T>);
+    pub struct RecA<T>(pub Option<RecB<T>>, pub core::marker::PhantomData<T>);
 
     impl<S, T> TraitA<S> for RecA<T>
     where
@@ -135,7 +135,7 @@ mod coinduction_mod {
         }
     }
 
-    struct RecB<T>(Option<Box<RecA<T>>>, core::marker::PhantomData<T>);
+    pub struct RecB<T>(pub Option<Box<RecA<T>>>, pub core::marker::PhantomData<T>);
 
     impl<S, T> TraitB<S> for RecB<T>
     where
@@ -158,141 +158,187 @@ mod coinduction_mod {
 
 use coinduction_mod::*;
 
-// #[coinduction(TraitA, TraitB)]
-// mod complex_recursive {
-//     use super::*;
-//
-//     struct RecC<T1, T2, T3, T4>((T1, Wrapper2<(T2, (T3, RecD<T1, T2, T3, T4>)), T4>));
-//
-//     struct RecD<T1, T2, T3, T4>(Option<Box<RecC<T1, T2, T3, T4>>>);
-//
-//     impl<T1, T2, T3, T4, S> TraitA<S> for RecC<T1, T2, T3, T4>
-//     where
-//         (T1, Wrapper2<(T2, (T3, RecD<T1, T2, T3, T4>)), T4>): TraitB<S>,
-//     {
-//         fn get_a(&self) -> String {
-//             format!("RecC: {}", self.0.get_b())
-//         }
-//     }
-//
-//     impl<T1, T2, T3, T4, S> TraitB<S> for RecD<T1, T2, T3, T4>
-//     where
-//         RecC<T1, T2, T3, T4>: TraitA<S>,
-//     {
-//         fn get_b(&self) -> String {
-//             if let Some(ref rec_c) = self.0 {
-//                 format!("RecD {}", rec_c.get_a())
-//             } else {
-//                 format!("RecD None")
-//             }
-//         }
-//     }
-// }
-//
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//
-//     #[test]
-//     fn test_rec_a_get_a_with_none() {
-//         let rec_a: RecA<i32> = RecA(None);
-//         assert_eq!(rec_a.get_a(), "None");
-//     }
-//
-//     #[test]
-//     fn test_rec_a_get_a_with_some() {
-//         let rec_b = RecB::<i32>(None);
-//         let rec_a = RecA(Some(rec_b));
-//         assert_eq!(rec_a.get_a(), "0 None");
-//     }
-//
-//     #[test]
-//     fn test_rec_a_get_a_nested() {
-//         let inner_rec_a = RecA::<u8>(None);
-//         let rec_b = RecB(Some(Box::new(inner_rec_a)));
-//         let rec_a = RecA(Some(rec_b));
-//         assert_eq!(rec_a.get_a(), "0 0None");
-//     }
-//
-//     #[test]
-//     fn test_rec_b_get_b_with_none() {
-//         let rec_b: RecB<String> = RecB(None);
-//         assert_eq!(rec_b.get_b(), "None");
-//     }
-//
-//     #[test]
-//     fn test_rec_b_get_b_with_some() {
-//         let rec_a = RecA::<String>(None);
-//         let rec_b = RecB(Some(Box::new(rec_a)));
-//         assert_eq!(rec_b.get_b(), "None");
-//     }
-//
-//     #[test]
-//     fn test_rec_b_get_b_nested() {
-//         let inner_rec_b = RecB::<u16>(None);
-//         let rec_a = RecA(Some(inner_rec_b));
-//         let rec_b = RecB(Some(Box::new(rec_a)));
-//         assert_eq!(rec_b.get_b(), "0 None");
-//     }
-//
-//     #[test]
-//     fn test_rec_a_deep_nesting() {
-//         let deepest_rec_a = RecA::<u64>(None);
-//         let deep_rec_b = RecB(Some(Box::new(deepest_rec_a)));
-//         let mid_rec_a = RecA(Some(deep_rec_b));
-//         let mid_rec_b = RecB(Some(Box::new(mid_rec_a)));
-//         let top_rec_a = RecA(Some(mid_rec_b));
-//         assert_eq!(top_rec_a.get_a(), "0 00 None");
-//     }
-//
-//     #[test]
-//     fn test_rec_b_deep_nesting() {
-//         let deepest_rec_b = RecB::<char>(None);
-//         let deep_rec_a = RecA(Some(deepest_rec_b));
-//         let mid_rec_b = RecB(Some(Box::new(deep_rec_a)));
-//         let mid_rec_a = RecA(Some(mid_rec_b));
-//         let top_rec_b = RecB(Some(Box::new(mid_rec_a)));
-//         assert_eq!(top_rec_b.get_b(), " None");
-//     }
-//
-//     #[test]
-//     fn test_rec_a_with_float_type() {
-//         let inner_rec_b = RecB::<f32>(None);
-//         let rec_a = RecA(Some(inner_rec_b));
-//         assert_eq!(rec_a.get_a(), "0 None");
-//     }
-//
-//     #[test]
-//     fn test_rec_b_with_bool_type() {
-//         let inner_rec_a = RecA::<bool>(None);
-//         let rec_b = RecB(Some(Box::new(inner_rec_a)));
-//         assert_eq!(rec_b.get_b(), "falseNone");
-//     }
-//
-//     #[test]
-//     fn test_rec_alternating_chain() {
-//         let level4_a = RecA::<u8>(None);
-//         let level3_b = RecB(Some(Box::new(level4_a)));
-//         let level2_a = RecA(Some(level3_b));
-//         let level1_b = RecB(Some(Box::new(level2_a)));
-//         let level0_a = RecA(Some(level1_b));
-//         assert_eq!(level0_a.get_a(), "0 00 None");
-//         assert_eq!(level1_b.get_b(), "00 None");
-//     }
-//
-//     #[test]
-//     fn test_rec_with_usize_type() {
-//         let rec_b = RecB::<usize>(None);
-//         let rec_a = RecA(Some(rec_b));
-//         assert_eq!(rec_a.get_a(), "0 None");
-//     }
-//
-//     #[test]
-//     fn test_rec_mixed_numeric_types() {
-//         let i8_rec_a = RecA::<i8>(None);
-//         let i16_rec_b = RecB(Some(Box::new(i8_rec_a)));
-//         let i32_rec_a = RecA(Some(i16_rec_b));
-//         let i64_rec_b = RecB(Some(Box::new(i32_rec_a)));
-//         assert_eq!(i64_rec_b.get_b(), "00 None");
-//     }
-// }
+#[coinduction(TraitA, TraitB)]
+mod complex_recursive {
+    use super::*;
+
+    struct RecC<T1, T2, T3, T4>((T1, Wrapper2<(T2, (T3, (T3, RecD<T1, T2, T3, T4>))), T4>));
+
+    struct RecD<T1, T2, T3, T4>(Option<Box<RecC<T1, T2, T3, T4>>>);
+
+    impl<T1, T2, T3, T4, S> TraitA<S> for RecC<T1, T2, T3, T4>
+    where
+        (T1, Wrapper2<(T2, (T3, (T3, RecD<T1, T2, T3, T4>))), T4>): TraitB<S>,
+        S: Display + Default,
+    {
+        fn get_a(&self) -> String {
+            format!(
+                "RecC: {}",
+                <(T1, Wrapper2<(T2, (T3, (T3, RecD<T1, T2, T3, T4>))), T4>) as TraitB<S>>::get_b(
+                    &self.0
+                )
+            )
+        }
+    }
+
+    impl<T1, T2, T3, T4, S> TraitB<S> for RecD<T1, T2, T3, T4>
+    where
+        RecC<T1, T2, T3, T4>: TraitA<S>,
+        T1: TraitB<S>,
+    {
+        fn get_b(&self) -> String {
+            if let Some(ref rec_c) = self.0 {
+                format!("RecD {}", <RecC<T1, T2, T3, T4> as TraitA<S>>::get_a(rec_c))
+            } else {
+                format!("RecD None")
+            }
+        }
+    }
+}
+mod complex_recursive2 {
+    use super::*;
+    struct RecC<T1, T2, T3, T4>((T1, Wrapper2<(T2, (T3, (T3, RecD<T1, T2, T3, T4>))), T4>));
+    struct RecD<T1, T2, T3, T4>(Option<Box<RecC<T1, T2, T3, T4>>>);
+    impl<T1, T2, T3, T4, S> TraitA<S> for RecC<T1, T2, T3, T4>
+    where
+        S: Default,
+        S: Display,
+        Wrapper2<(T2, (T3, (T3, RecD<T1, T2, T3, T4>))), T4>: TraitA<S>,
+        // (T1, Wrapper2<(T2, (T3, (T3, RecD<T1, T2, T3, T4>))), T4>): TraitB<S>, // <
+        T1: TraitB<S>,
+    {
+        fn get_a(&self) -> String {
+            format!(
+                "RecC: {}",
+                <(T1, Wrapper2<(T2, (T3, (T3, RecD<T1, T2, T3, T4>))), T4>) as TraitB<S>>::get_b(
+                    &self.0
+                )
+            )
+        }
+    }
+    impl<T1, T2, T3, T4, S> TraitB<S> for RecD<T1, T2, T3, T4>
+    where
+        S: Display,
+        (T1, Wrapper2<(T2, (T3, (T3, RecD<T1, T2, T3, T4>))), T4>): TraitB<S>,
+        S: Default,
+        T4: Default + Display,     // <
+        T2: TraitA<S>,             // <
+        T3: TraitB<S> + TraitA<S>, // <
+        T1: TraitB<S>,
+    {
+        fn get_b(&self) -> String {
+            if let Some(ref rec_c) = self.0 {
+                format!("RecD {}", <RecC<T1, T2, T3, T4> as TraitA<S>>::get_a(rec_c))
+            } else {
+                format!("RecD None")
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rec_a_get_a_with_none() {
+        let rec_a: RecA<i32> = RecA(None, core::marker::PhantomData);
+        assert_eq!(<_ as TraitA<()>>::get_a(&rec_a), "None");
+    }
+
+    #[test]
+    fn test_rec_a_get_a_with_some() {
+        let rec_b = RecB::<i32>(None, core::marker::PhantomData);
+        let rec_a = RecA(Some(rec_b), core::marker::PhantomData);
+        assert_eq!(<_ as TraitA<()>>::get_a(&rec_a), "0 None");
+    }
+
+    #[test]
+    fn test_rec_a_get_a_nested() {
+        let inner_rec_a = RecA::<u8>(None, core::marker::PhantomData);
+        let rec_b = RecB(Some(Box::new(inner_rec_a)), core::marker::PhantomData);
+        let rec_a = RecA(Some(rec_b), core::marker::PhantomData);
+        assert_eq!(<_ as TraitA<()>>::get_a(&rec_a), "0 0 None");
+    }
+
+    #[test]
+    fn test_rec_b_get_b_with_none() {
+        let rec_b: RecB<i32> = RecB(None, core::marker::PhantomData);
+        assert_eq!(<_ as TraitB<()>>::get_b(&rec_b), "None");
+    }
+
+    #[test]
+    fn test_rec_b_get_b_with_some() {
+        let rec_a = RecA::<i32>(None, core::marker::PhantomData);
+        let rec_b = RecB(Some(Box::new(rec_a)), core::marker::PhantomData);
+        assert_eq!(<_ as TraitB<()>>::get_b(&rec_b), "0 None");
+    }
+
+    #[test]
+    fn test_rec_b_get_b_nested() {
+        let inner_rec_b = RecB::<u16>(None, core::marker::PhantomData);
+        let rec_a = RecA(Some(inner_rec_b), core::marker::PhantomData);
+        let rec_b = RecB(Some(Box::new(rec_a)), core::marker::PhantomData);
+        assert_eq!(<_ as TraitB<()>>::get_b(&rec_b), "0 0 None");
+    }
+
+    #[test]
+    fn test_rec_a_deep_nesting() {
+        let deepest_rec_a = RecA::<u64>(None, core::marker::PhantomData);
+        let deep_rec_b = RecB(Some(Box::new(deepest_rec_a)), core::marker::PhantomData);
+        let mid_rec_a = RecA(Some(deep_rec_b), core::marker::PhantomData);
+        let mid_rec_b = RecB(Some(Box::new(mid_rec_a)), core::marker::PhantomData);
+        let top_rec_a = RecA(Some(mid_rec_b), core::marker::PhantomData);
+        assert_eq!(<_ as TraitA<()>>::get_a(&top_rec_a), "0 0 0 0 None");
+    }
+
+    #[test]
+    fn test_rec_b_deep_nesting() {
+        let deepest_rec_b = RecB::<u32>(None, core::marker::PhantomData);
+        let deep_rec_a = RecA(Some(deepest_rec_b), core::marker::PhantomData);
+        let mid_rec_b = RecB(Some(Box::new(deep_rec_a)), core::marker::PhantomData);
+        let mid_rec_a = RecA(Some(mid_rec_b), core::marker::PhantomData);
+        let top_rec_b = RecB(Some(Box::new(mid_rec_a)), core::marker::PhantomData);
+        assert_eq!(<_ as TraitB<()>>::get_b(&top_rec_b), "0 0 0 0 None");
+    }
+
+    #[test]
+    fn test_rec_a_with_i128_type() {
+        let inner_rec_b = RecB::<i128>(None, core::marker::PhantomData);
+        let rec_a = RecA(Some(inner_rec_b), core::marker::PhantomData);
+        assert_eq!(<_ as TraitA<()>>::get_a(&rec_a), "0 None");
+    }
+
+    #[test]
+    fn test_rec_b_with_u128_type() {
+        let inner_rec_a = RecA::<u128>(None, core::marker::PhantomData);
+        let rec_b = RecB(Some(Box::new(inner_rec_a)), core::marker::PhantomData);
+        assert_eq!(<_ as TraitB<()>>::get_b(&rec_b), "0 None");
+    }
+
+    #[test]
+    fn test_rec_alternating_chain() {
+        let level4_a = RecA::<u8>(None, core::marker::PhantomData);
+        let level3_b = RecB(Some(Box::new(level4_a)), core::marker::PhantomData);
+        let level2_a = RecA(Some(level3_b), core::marker::PhantomData);
+        let level1_b = RecB(Some(Box::new(level2_a)), core::marker::PhantomData);
+        let level0_a = RecA(Some(level1_b), core::marker::PhantomData);
+        assert_eq!(<_ as TraitA<()>>::get_a(&level0_a), "0 0 0 0 None");
+    }
+
+    #[test]
+    fn test_rec_with_usize_type() {
+        let rec_b = RecB::<usize>(None, core::marker::PhantomData);
+        let rec_a = RecA(Some(rec_b), core::marker::PhantomData);
+        assert_eq!(<_ as TraitA<()>>::get_a(&rec_a), "0 None");
+    }
+
+    #[test]
+    fn test_rec_mixed_numeric_types() {
+        let i8_rec_a = RecA::<i8>(None, core::marker::PhantomData);
+        let i16_rec_b = RecB(Some(Box::new(i8_rec_a)), core::marker::PhantomData);
+        let i32_rec_a = RecA(Some(i16_rec_b), core::marker::PhantomData);
+        let i64_rec_b = RecB(Some(Box::new(i32_rec_a)), core::marker::PhantomData);
+        assert_eq!(<_ as TraitB<()>>::get_b(&i64_rec_b), "0 0 0 None");
+    }
+}

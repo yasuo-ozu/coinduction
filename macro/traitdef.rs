@@ -44,6 +44,52 @@ impl Parse for TraitDefArgs {
     }
 }
 
+fn remove_matcher_kinds(input: TokenStream) -> TokenStream {
+    // Remove the `XXX` from `$yyy:XXX` in input
+    use proc_macro2::TokenTree;
+
+    let mut result = TokenStream::new();
+    let mut tokens = input.into_iter().peekable();
+
+    while let Some(token) = tokens.next() {
+        match token {
+            TokenTree::Punct(ref p) if p.as_char() == '$' => {
+                // This is a macro variable marker ($)
+                result.extend(Some(token));
+
+                // Get the variable name following $
+                if let Some(name) = tokens.next() {
+                    result.extend(Some(name));
+
+                    // Check if next is a colon (indicating matcher kind specifier)
+                    if let Some(TokenTree::Punct(ref colon)) = tokens.peek() {
+                        if colon.as_char() == ':' {
+                            // Skip the colon
+                            tokens.next();
+                            // Skip the matcher kind (e.g., ident, ty, expr, etc.)
+                            tokens.next();
+                        }
+                    }
+                }
+            }
+            TokenTree::Group(group) => {
+                // Recursively process groups (parentheses, braces, brackets)
+                let delim = group.delimiter();
+                let stream = remove_matcher_kinds(group.stream());
+                let mut new_group = proc_macro2::Group::new(delim, stream);
+                new_group.set_span(group.span());
+                result.extend(Some(TokenTree::Group(new_group)));
+            }
+            _ => {
+                // Pass through other tokens unchanged
+                result.extend(Some(token));
+            }
+        }
+    }
+
+    result
+}
+
 pub fn traitdef(item: ItemTrait, args: TraitDefArgs) -> TokenStream {
     let random_suffix = crate::get_random();
     let temporal_mac_name = syn::Ident::new(
@@ -58,37 +104,37 @@ pub fn traitdef(item: ItemTrait, args: TraitDefArgs) -> TokenStream {
         #[doc(hidden)]
         #[macro_export]
         macro_rules! #temporal_mac_name {
-            #(for (pattern, constraints) in &args.rules) {
-                (#crate_version, None, [#pattern  $(,$($wt:tt)*)?], $coinduction:path, $($t:tt)*) => {
-                    $coinduction::__next_step ! {
+            #(for (pattern, pattern_converted, constraints) in args.rules.iter().map(|(pattern, constraints)| (pattern.clone(), remove_matcher_kinds(pattern.clone()), constraints))) {
+                (#crate_version, None, [#pattern  :$($wt:tt)*], {$($coinduction:tt)+}, $($t:tt)*) => {
+                    $($coinduction)+::__next_step ! {
                         #crate_version, Traitdef {
                             appending_constraints: [
                                 #constraints
                             ]
-                        }, [_ $(,$($wt)*)?], $coinduction, $($t)*
+                        }, [#pattern_converted :$($wt)*], {$($coinduction)+}, $($t)*
                     }
                 };
             }
             (#crate_version, None, [
                  :: $seg0:ident $(:: $segs:ident)* $(<$($arg:ty),*$(,)?>)?
                  :$($wt:tt)*
-            ], $coinduction:path, $($t:tt)*) => {
+            ], {$($coinduction:tt)+}, $($t:tt)*) => {
                 :: $seg0 $(:: $segs)* ! {
                     #crate_version, None, [
                         $ty0: :: $seg0 $(:: $segs)* $(<$($arg),*>)?
                         :$($wt)*
-                    ], $coinduction, $($t)*
+                    ], {$($coinduction)+}, $($t)*
                 }
             };
             (#crate_version, None, [
                  $seg0:ident $(:: $segs:ident)* $(<$($arg:ty),*$(,)?>)?
                  :$($wt:tt)*
-            ], $coinduction:path, $($t:tt)*) => {
+            ], {$($coinduction:tt)+}, $($t:tt)*) => {
                  $seg0 $(:: $segs)*! {
                     #crate_version, None, [
                         $seg0 $(:: $segs)* $(<$($arg),*>)?
                         :$($wt)*
-                    ], $coinduction, $($t)*
+                    ], {$($coinduction)+}, $($t)*
                 }
             };
         }

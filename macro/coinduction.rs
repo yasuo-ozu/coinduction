@@ -36,7 +36,7 @@ pub fn coinduction(module: ItemMod, args: CoinductionArgs) -> TokenStream {
             _ => None,
         })
         .collect();
-    let trait_paths: HashSet<_> = if args.paths.len() > 0 {
+    let working_traits: HashSet<_> = if args.paths.len() > 0 {
         args.paths.into_iter().collect()
     } else {
         target_items
@@ -47,7 +47,7 @@ pub fn coinduction(module: ItemMod, args: CoinductionArgs) -> TokenStream {
     let rewrite_rules = target_items
         .iter()
         .filter_map(|item_impl| {
-            trait_paths
+            working_traits
                 .contains(&remove_path_args(&item_impl.trait_.as_ref().unwrap().1))
                 .then(|| {
                     let mut rules = Vec::new();
@@ -88,7 +88,7 @@ pub fn coinduction(module: ItemMod, args: CoinductionArgs) -> TokenStream {
                 typ: item_impl.self_ty.as_ref().clone(),
                 trait_path: item_impl.trait_.as_ref().unwrap().1.clone(),
             };
-            if !trait_paths.contains(&remove_path_args(&constraint.trait_path)) {
+            if !working_traits.contains(&remove_path_args(&constraint.trait_path)) {
                 return None;
             }
             let mut solver = Solver {
@@ -112,11 +112,19 @@ pub fn coinduction(module: ItemMod, args: CoinductionArgs) -> TokenStream {
                             MAX_ITERATIONS
                         );
                     }
-                    if !trait_paths.contains(&remove_path_args(&constraint.trait_path)) {
+                    if !working_traits.contains(&remove_path_args(&constraint.trait_path)) {
                         continue;
                     }
-                    if !matches!(&constraint.typ, Type::Path(p) if module_defined_types.contains(&remove_path_args(&p.path))) {
+                    let is_module_type = matches!(&constraint.typ, Type::Path(p) if module_defined_types.contains(&remove_path_args(&p.path)));
+                    let is_generic = matches!(&constraint.typ, Type::Path(p) if p.path.segments.len() == 1 &&
+                        item_impl.generics.params.iter().any(|param|
+                            matches!(param, GenericParam::Type(tp) if tp.ident == p.path.segments[0].ident)
+                        )
+                    );
+
+                    if !is_module_type && !is_generic {
                         working_list.insert(constraint.clone());
+                        continue;
                     }
 
                     for (generics, rule_constraint, rule_constraints) in &rewrite_rules {
@@ -148,8 +156,9 @@ pub fn coinduction(module: ItemMod, args: CoinductionArgs) -> TokenStream {
     let next_step_args = NextStepArgs {
         kind: NextStepKind::None,
         working_list: working_list.into_iter().collect(),
-        solvers,
         coinduction: args.coinduction,
+        working_traits: working_traits.into_iter().collect(),
+        solvers,
         module,
     };
     next_step(next_step_args)

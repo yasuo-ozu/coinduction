@@ -34,7 +34,7 @@ pub fn typedef(module: ItemMod, args: TypeDefArgs) -> TokenStream {
         .into_iter()
         .flatten()
         .collect::<Vec<_>>();
-    let trait_paths: HashSet<_> = if args.paths.len() > 0 {
+    let working_traits: HashSet<_> = if args.paths.len() > 0 {
         args.paths.into_iter().collect()
     } else {
         content
@@ -77,7 +77,7 @@ pub fn typedef(module: ItemMod, args: TypeDefArgs) -> TokenStream {
                     }) = self_ty.as_ref()
                     {
                         if segments.len() == 1
-                            && trait_paths.contains(&remove_path_args(trait_path))
+                            && working_traits.contains(&remove_path_args(trait_path))
                         {
                             acc.entry(segments[0].ident.clone()).or_default().push((
                                 generics.clone(),
@@ -110,11 +110,11 @@ pub fn typedef(module: ItemMod, args: TypeDefArgs) -> TokenStream {
                 #[doc(hidden)]
                 #[macro_export]
                 macro_rules! #temporal_mac_name {
-                    (#crate_version, None, [$($wt:tt)*], $coinduction:path, $($t:tt)*) => {
-                        $coinduction::__next_step {
+                    (#crate_version, None, [$($wt:tt)*], {$($coinduction:tt)+}, $($t:tt)*) => {
+                        $($coinduction)+::__next_step! {
                             #crate_version, Typedef {
                                 predicates: [
-                                    #(for (generics, trait_path, self_args) in impls) {
+                                    #(for (generics, trait_path, self_args) in impls), {
                                         (
                                             [ #(for p in &generics.params), {#p} ],
                                             #ty_ident #self_args: #trait_path ,
@@ -133,7 +133,7 @@ pub fn typedef(module: ItemMod, args: TypeDefArgs) -> TokenStream {
                                         )
                                     }
                                 ]
-                            }, [$($wt)*], $coinduction, $($tt)*
+                            }, [$($wt)*], {$($coinduction)+}, $($t)*
                         }
                     }
                 }

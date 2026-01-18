@@ -19,7 +19,7 @@ const PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Clone, PartialEq)]
 pub enum NextStepKind {
     Traitdef {
-        appending_constraints: Vec<Constraint>,
+        appending_constraints: Vec<PredicateType>,
     },
     Typedef {
         predicates: Vec<(HashSet<GenericParam>, Constraint, Vec<Constraint>)>,
@@ -45,10 +45,21 @@ impl Parse for NextStepKind {
                 content.parse::<Token![:]>()?;
                 let constraints_content;
                 syn::bracketed!(constraints_content in content);
-                let constraints: Punctuated<Constraint, Token![,]> =
-                    constraints_content.parse_terminated(Constraint::parse, Token![,])?;
+                let mut constraints = Vec::new();
+                while !constraints_content.is_empty() {
+                    let pred = constraints_content.parse::<WherePredicate>()?;
+                    if let WherePredicate::Type(pred_type) = pred {
+                        constraints.push(pred_type);
+                    } else {
+                        abort!(pred, "expected type predicate");
+                    }
+                    if constraints_content.parse::<Token![,]>().is_err() {
+                        break;
+                    }
+                }
+
                 Ok(NextStepKind::Traitdef {
-                    appending_constraints: constraints.into_iter().collect(),
+                    appending_constraints: constraints,
                 })
             }
             "Typedef" => {
@@ -83,8 +94,8 @@ impl Parse for NextStepKind {
                         vec_content.parse_terminated(Constraint::parse, Token![,])?;
 
                     predicates.push((param_set, constraint, constraints.into_iter().collect()));
-                    if predicates_content.peek(Token![,]) {
-                        predicates_content.parse::<Token![,]>()?;
+                    if predicates_content.parse::<Token![,]>().is_err() {
+                        break;
                     }
                 }
                 Ok(NextStepKind::Typedef { predicates })
@@ -132,6 +143,7 @@ pub struct NextStepArgs {
     pub kind: NextStepKind,
     pub working_list: VecDeque<Constraint>,
     pub coinduction: NoArgPath,
+    pub working_traits: Vec<NoArgPath>,
     pub solvers: Vec<Option<Solver>>,
     pub module: ItemMod,
 }
@@ -165,8 +177,19 @@ impl Parse for NextStepArgs {
 
         input.parse::<Token![,]>()?;
 
-        // Parse coinduction
-        let coinduction: NoArgPath = input.parse()?;
+        // Parse coinduction surrounded by braces
+        let coinduction_content;
+        syn::braced!(coinduction_content in input);
+        let coinduction: NoArgPath = coinduction_content.parse()?;
+
+        input.parse::<Token![,]>()?;
+
+        // Parse working_traits
+        let working_traits_content;
+        syn::bracketed!(working_traits_content in input);
+        let working_traits_vec: Punctuated<NoArgPath, Token![,]> =
+            working_traits_content.parse_terminated(NoArgPath::parse, Token![,])?;
+        let working_traits: Vec<NoArgPath> = working_traits_vec.into_iter().collect();
 
         input.parse::<Token![,]>()?;
 
@@ -208,6 +231,7 @@ impl Parse for NextStepArgs {
             kind,
             working_list,
             coinduction,
+            working_traits,
             solvers,
             module,
         })
@@ -218,6 +242,7 @@ impl ToTokens for NextStepArgs {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let kind = &self.kind;
         let working_list: Vec<_> = self.working_list.iter().collect();
+        let working_traits: Vec<_> = self.working_traits.iter().collect();
         let solver_tokens: Vec<_> = self
             .solvers
             .iter()
@@ -233,7 +258,8 @@ impl ToTokens for NextStepArgs {
             #PACKAGE_VERSION,
             #kind,
             [#(#working_list),*],
-            #coinduction,
+            {#coinduction},
+            [#(#working_traits),*],
             [#(#solver_tokens),*],
             #module
         });
@@ -248,14 +274,34 @@ pub fn next_step(mut args: NextStepArgs) -> TokenStream {
             solver.graph.scope_mut(|mut graph| {
                 let root_ix_opt = graph
                     .node_pairs()
-                    .find(|(_, node)| node == &&target)
+                    .find(|(_, node)| {
+                        template_quote::quote!(#node).to_string()
+                            == template_quote::quote!(#target).to_string()
+                    })
                     .map(|(ix, _)| ix);
 
                 if let Some(root_ix) = root_ix_opt {
                     let dep_constraints = match &args.kind {
                         NextStepKind::Traitdef {
                             appending_constraints,
-                        } => appending_constraints.clone(),
+                        } => appending_constraints
+                            .iter()
+                            .flat_map(|pred| {
+                                pred.bounds.iter().map(|bound| {
+                                    if let TypeParamBound::Trait(trait_bound) = bound {
+                                        (
+                                            Constraint {
+                                                typ: pred.bounded_ty.clone(),
+                                                trait_path: trait_bound.path.clone(),
+                                            },
+                                            HashSet::new(),
+                                        )
+                                    } else {
+                                        abort!(bound, "non-trait bounds are not supported")
+                                    }
+                                })
+                            })
+                            .collect::<Vec<_>>(),
                         NextStepKind::Typedef { predicates } => predicates
                             .iter()
                             .map(|(params, replacing, new_constraints)| {
@@ -263,21 +309,47 @@ pub fn next_step(mut args: NextStepArgs) -> TokenStream {
                                     new_constraints.iter().map(move |new_constraint| {
                                         let mut new_constraint = new_constraint.clone();
                                         new_constraint.replace(&substitute);
-                                        new_constraint
+                                        (new_constraint, params.clone())
                                     })
                                 })
                             })
                             .flatten()
                             .flatten()
-                            .collect(),
+                            .collect::<Vec<_>>(),
                         NextStepKind::None => unreachable!(),
                     };
 
-                    for new_constraint in dep_constraints {
+                    for (new_constraint, additional_params) in dep_constraints {
                         let existing_ix_opt = graph
                             .node_pairs()
                             .find(|(_, c)| *c == &new_constraint)
                             .map(|(ix, _)| ix);
+                        if existing_ix_opt.is_none() {
+                            let not_in_working_list = !args.working_list.contains(&new_constraint);
+
+                            // Check if the type contains any generic parameters
+                            let typ_str =
+                                template_quote::quote!(#{&new_constraint.typ}).to_string();
+                            let is_generic =
+                                solver.generic_params.iter().chain(&additional_params).any(
+                                    |param| {
+                                        if let GenericParam::Type(tp) = param {
+                                            let param_str = template_quote::quote!(#tp).to_string();
+                                            &typ_str == &param_str
+                                        } else {
+                                            false
+                                        }
+                                    },
+                                );
+
+                            let trait_in_working_traits = args.working_traits.iter().any(|wt| {
+                                wt == &crate::remove_path_args(&new_constraint.trait_path)
+                            });
+
+                            if not_in_working_list && !is_generic && trait_in_working_traits {
+                                args.working_list.push_back(new_constraint.clone());
+                            }
+                        }
                         let target_ix =
                             existing_ix_opt.unwrap_or_else(|| graph.add_node(new_constraint));
                         let edge_exists = graph
@@ -298,6 +370,7 @@ pub fn next_step(mut args: NextStepArgs) -> TokenStream {
             #macro_path ! { #args }
         }
     } else {
+        dbg!(quote! {#args}.to_string());
         let mut module = args.module.clone();
         for (impl_item, solver) in module
             .content
@@ -322,6 +395,10 @@ pub fn next_step(mut args: NextStepArgs) -> TokenStream {
                     .collect::<Vec<_>>();
                 Constraint::map_generics(&mut impl_item.generics, |constraint| {
                     if let Some(the_loop) = loops.iter().find(|lp| lp.contains_key(&constraint)) {
+                        dbg!(the_loop
+                            .iter()
+                            .map(|(c, _)| quote!(#c).to_string())
+                            .collect::<Vec<_>>());
                         let dependencies = the_loop
                             .values()
                             .map(|ix| {

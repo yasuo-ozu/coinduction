@@ -144,6 +144,7 @@ pub struct NextStepArgs {
     pub working_list: VecDeque<Constraint>,
     pub coinduction: NoArgPath,
     pub working_traits: Vec<NoArgPath>,
+    pub ignore_tys: HashSet<Ident>,
     pub solvers: Vec<Option<Solver>>,
     pub module: ItemMod,
 }
@@ -193,6 +194,15 @@ impl Parse for NextStepArgs {
 
         input.parse::<Token![,]>()?;
 
+        // Parse ignore_tys
+        let ignore_tys_content;
+        syn::bracketed!(ignore_tys_content in input);
+        let ignore_tys_vec: Punctuated<Ident, Token![,]> =
+            ignore_tys_content.parse_terminated(Ident::parse, Token![,])?;
+        let ignore_tys: HashSet<Ident> = ignore_tys_vec.into_iter().collect();
+
+        input.parse::<Token![,]>()?;
+
         // Parse solvers
         let solvers_content;
         syn::bracketed!(solvers_content in input);
@@ -232,6 +242,7 @@ impl Parse for NextStepArgs {
             working_list,
             coinduction,
             working_traits,
+            ignore_tys,
             solvers,
             module,
         })
@@ -243,6 +254,7 @@ impl ToTokens for NextStepArgs {
         let kind = &self.kind;
         let working_list: Vec<_> = self.working_list.iter().collect();
         let working_traits: Vec<_> = self.working_traits.iter().collect();
+        let ignore_tys: Vec<_> = self.ignore_tys.iter().collect();
         let solver_tokens: Vec<_> = self
             .solvers
             .iter()
@@ -260,6 +272,7 @@ impl ToTokens for NextStepArgs {
             [#(#working_list),*],
             {#coinduction},
             [#(#working_traits),*],
+            [#(#ignore_tys),*],
             [#(#solver_tokens),*],
             #module
         });
@@ -306,8 +319,8 @@ pub fn next_step(mut args: NextStepArgs) -> TokenStream {
                             .iter()
                             .map(|(params, replacing, new_constraints)| {
                                 replacing.matches(&target, &params).map(|substitute| {
-                                    new_constraints.iter().map(move |new_constraint| {
-                                        let mut new_constraint = new_constraint.clone();
+                                    new_constraints.iter().map(move |new_constraint0| {
+                                        let mut new_constraint = new_constraint0.clone();
                                         new_constraint.replace(&substitute);
                                         (new_constraint, params.clone())
                                     })
@@ -346,7 +359,17 @@ pub fn next_step(mut args: NextStepArgs) -> TokenStream {
                                 wt == &crate::remove_path_args(&new_constraint.trait_path)
                             });
 
-                            if not_in_working_list && !is_generic && trait_in_working_traits {
+                            let is_ignored = matches!(
+                                crate::unwrap_type_group(new_constraint.typ.clone()),
+                                Type::Path(TypePath { qself: None, path })
+                                if path.segments.len() == 1 && args.ignore_tys.contains(&path.segments[0].ident)
+                            );
+
+                            if not_in_working_list
+                                && !is_generic
+                                && trait_in_working_traits
+                                && !is_ignored
+                            {
                                 args.working_list.push_back(new_constraint.clone());
                             }
                         }
@@ -370,7 +393,6 @@ pub fn next_step(mut args: NextStepArgs) -> TokenStream {
             #macro_path ! { #args }
         }
     } else {
-        dbg!(quote! {#args}.to_string());
         let mut module = args.module.clone();
         for (impl_item, solver) in module
             .content
@@ -395,10 +417,6 @@ pub fn next_step(mut args: NextStepArgs) -> TokenStream {
                     .collect::<Vec<_>>();
                 Constraint::map_generics(&mut impl_item.generics, |constraint| {
                     if let Some(the_loop) = loops.iter().find(|lp| lp.contains_key(&constraint)) {
-                        dbg!(the_loop
-                            .iter()
-                            .map(|(c, _)| quote!(#c).to_string())
-                            .collect::<Vec<_>>());
                         let dependencies = the_loop
                             .values()
                             .map(|ix| {

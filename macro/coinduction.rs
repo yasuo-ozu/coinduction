@@ -68,16 +68,16 @@ pub fn coinduction(module: ItemMod, args: CoinductionArgs) -> TokenStream {
         .collect::<Vec<_>>();
     let mut working_list = HashSet::new();
     // Iterate items in the module, and generate Ident list of the struct/enum/unions
-    let module_defined_types: HashSet<NoArgPath> = module
+    let ignore_tys: HashSet<Ident> = module
         .content
         .as_ref()
         .map(|c| &c.1)
         .into_iter()
         .flatten()
         .filter_map(|item| match item {
-            Item::Struct(item_struct) => Some(remove_path_args(&item_struct.ident.clone().into())),
-            Item::Enum(item_enum) => Some(remove_path_args(&item_enum.ident.clone().into())),
-            Item::Union(item_union) => Some(remove_path_args(&item_union.ident.clone().into())),
+            Item::Struct(item_struct) => Some(item_struct.ident.clone()),
+            Item::Enum(item_enum) => Some(item_enum.ident.clone()),
+            Item::Union(item_union) => Some(item_union.ident.clone()),
             _ => None,
         })
         .collect();
@@ -115,8 +115,9 @@ pub fn coinduction(module: ItemMod, args: CoinductionArgs) -> TokenStream {
                     if !working_traits.contains(&remove_path_args(&constraint.trait_path)) {
                         continue;
                     }
-                    let is_module_type = matches!(&constraint.typ, Type::Path(p) if module_defined_types.contains(&remove_path_args(&p.path)));
-                    let is_generic = matches!(&constraint.typ, Type::Path(p) if p.path.segments.len() == 1 &&
+                    let unwrapped_typ = crate::unwrap_type_group(constraint.typ.clone());
+                    let is_module_type = matches!(&unwrapped_typ, Type::Path(p) if p.path.segments.len() == 1 && ignore_tys.contains(&p.path.segments[0].ident));
+                    let is_generic = matches!(&unwrapped_typ, Type::Path(p) if p.path.segments.len() == 1 &&
                         item_impl.generics.params.iter().any(|param|
                             matches!(param, GenericParam::Type(tp) if tp.ident == p.path.segments[0].ident)
                         )
@@ -158,6 +159,7 @@ pub fn coinduction(module: ItemMod, args: CoinductionArgs) -> TokenStream {
         working_list: working_list.into_iter().collect(),
         coinduction: args.coinduction,
         working_traits: working_traits.into_iter().collect(),
+        ignore_tys,
         solvers,
         module,
     };

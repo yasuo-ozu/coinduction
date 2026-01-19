@@ -70,6 +70,16 @@ fn get_random() -> u64 {
         .finish()
 }
 
+/// Unwrap TypeGroup/TypeParen which may be introduced during macro expansion
+fn unwrap_type_group(typ: Type) -> Type {
+    match typ {
+        Type::Group(TypeGroup { elem, .. }) | Type::Paren(TypeParen { elem, .. }) => {
+            unwrap_type_group(*elem)
+        }
+        _ => typ,
+    }
+}
+
 mod coinduction;
 mod matching;
 mod next_step;

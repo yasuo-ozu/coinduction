@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use coinduction::*;
 use std::fmt::{Display, UpperHex};
 
@@ -91,6 +93,7 @@ mod typedef_mod {
 
     pub struct Wrapper2<T, U>(T, core::marker::PhantomData<U>);
 
+    // (Wrapper2 < (T2, (T3, (T3, RecD < T1, T2, T3, T4 >))), T4 > : TraitA < S > , T : TraitA < S >),
     impl<T, S, U> TraitA<S> for Wrapper2<T, U>
     where
         T: TraitA<S>,
@@ -184,46 +187,6 @@ mod complex_recursive {
     impl<T1, T2, T3, T4, S> TraitB<S> for RecD<T1, T2, T3, T4>
     where
         RecC<T1, T2, T3, T4>: TraitA<S>,
-        T1: TraitB<S>,
-    {
-        fn get_b(&self) -> String {
-            if let Some(ref rec_c) = self.0 {
-                format!("RecD {}", <RecC<T1, T2, T3, T4> as TraitA<S>>::get_a(rec_c))
-            } else {
-                format!("RecD None")
-            }
-        }
-    }
-}
-mod complex_recursive2 {
-    use super::*;
-    struct RecC<T1, T2, T3, T4>((T1, Wrapper2<(T2, (T3, (T3, RecD<T1, T2, T3, T4>))), T4>));
-    struct RecD<T1, T2, T3, T4>(Option<Box<RecC<T1, T2, T3, T4>>>);
-    impl<T1, T2, T3, T4, S> TraitA<S> for RecC<T1, T2, T3, T4>
-    where
-        S: Default,
-        S: Display,
-        Wrapper2<(T2, (T3, (T3, RecD<T1, T2, T3, T4>))), T4>: TraitA<S>,
-        // (T1, Wrapper2<(T2, (T3, (T3, RecD<T1, T2, T3, T4>))), T4>): TraitB<S>, // <
-        T1: TraitB<S>,
-    {
-        fn get_a(&self) -> String {
-            format!(
-                "RecC: {}",
-                <(T1, Wrapper2<(T2, (T3, (T3, RecD<T1, T2, T3, T4>))), T4>) as TraitB<S>>::get_b(
-                    &self.0
-                )
-            )
-        }
-    }
-    impl<T1, T2, T3, T4, S> TraitB<S> for RecD<T1, T2, T3, T4>
-    where
-        S: Display,
-        (T1, Wrapper2<(T2, (T3, (T3, RecD<T1, T2, T3, T4>))), T4>): TraitB<S>,
-        S: Default,
-        T4: Default + Display,     // <
-        T2: TraitA<S>,             // <
-        T3: TraitB<S> + TraitA<S>, // <
         T1: TraitB<S>,
     {
         fn get_b(&self) -> String {

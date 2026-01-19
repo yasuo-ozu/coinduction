@@ -17,8 +17,8 @@ fn has_attributes_recursive(arg: &GenericArgument) -> bool {
     checker.0
 }
 
-#[derive(Clone, Default, PartialEq, Eq)]
-pub struct Substitute(HashMap<GenericParam, GenericArgument>);
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
+pub struct Substitute(pub HashMap<GenericParam, GenericArgument>);
 
 impl Deref for Substitute {
     type Target = HashMap<GenericParam, GenericArgument>;
@@ -325,6 +325,20 @@ impl Matching for Type {
     fn replace(&mut self, dict: &Substitute) {
         match self {
             Type::Path(type_path) => {
+                if let (None, Some(ident)) = (&type_path.qself, type_path.path.get_ident()) {
+                    let predicate = GenericParam::Type(TypeParam {
+                        attrs: vec![],
+                        ident: ident.clone(),
+                        colon_token: None,
+                        bounds: Default::default(),
+                        eq_token: None,
+                        default: None,
+                    });
+                    if let Some(GenericArgument::Type(new_ty)) = dict.get(&predicate) {
+                        *self = new_ty.clone();
+                        return;
+                    }
+                }
                 if let Some(qself) = &mut type_path.qself {
                     qself.ty.replace(dict);
                 }

@@ -37,10 +37,8 @@ impl Constraint {
                     bounds,
                     ..
                 }) => {
-                    if lifetimes.is_some() {
-                        todo!("bounded lifetimes is not supported");
-                    }
-                    let additional_predicates = Self::map_bounds(bounds, bounded_ty, &mut f);
+                    let additional_predicates =
+                        Self::map_bounds(bounds, bounded_ty, lifetimes.as_ref(), &mut f);
                     wc.predicates.extend(additional_predicates);
                 }
                 _ => wc.predicates.extend(core::iter::once(pair)),
@@ -51,6 +49,7 @@ impl Constraint {
     fn map_bounds(
         bounds: &mut Punctuated<TypeParamBound, Token![+]>,
         bounded_ty: &Type,
+        lifetimes: Option<&BoundLifetimes>,
         mut f: impl FnMut(Self) -> Vec<Self>,
     ) -> Vec<WherePredicate> {
         let mut additional_predicates = Vec::new();
@@ -59,15 +58,12 @@ impl Constraint {
             match bound.into_value() {
                 TypeParamBound::Trait(TraitBound {
                     modifier,
-                    lifetimes,
+                    lifetimes: bound_lifetimes,
                     path,
                     ..
                 }) => {
                     if &modifier != &TraitBoundModifier::None {
                         abort!(&modifier, "trait bound modifier is not supported");
-                    }
-                    if lifetimes.is_some() {
-                        todo!("bounded lifetimes is not supported");
                     }
                     for replacing in f(Constraint {
                         typ: bounded_ty.clone(),
@@ -76,17 +72,19 @@ impl Constraint {
                         let new_bound = TypeParamBound::Trait(TraitBound {
                             paren_token: None,
                             modifier,
-                            lifetimes: lifetimes.clone(),
+                            lifetimes: bound_lifetimes.clone(),
                             path: replacing.trait_path,
                         });
-                        if &replacing.typ == bounded_ty {
+                        if crate::unwrap_type_group(replacing.typ.clone())
+                            == crate::unwrap_type_group(bounded_ty.clone())
+                        {
                             bounds.push(new_bound);
                             if let Some(punct) = punct.clone() {
                                 bounds.push_punct(punct);
                             }
                         } else {
                             additional_predicates.push(WherePredicate::Type(PredicateType {
-                                lifetimes: None,
+                                lifetimes: lifetimes.cloned(),
                                 bounded_ty: replacing.typ,
                                 colon_token: Default::default(),
                                 bounds: core::iter::once(new_bound).collect(),
@@ -126,7 +124,7 @@ impl Constraint {
                     qself: None,
                     path: ident.clone().into(),
                 });
-                Self::map_bounds(bounds, &bounded_ty, f)
+                Self::map_bounds(bounds, &bounded_ty, None, f)
             }
             _ => Vec::new(),
         }
@@ -141,6 +139,22 @@ struct ConstraintTuple {
 
 impl Parse for Constraint {
     fn parse(input: ParseStream) -> syn::Result<Self> {
+        // Skip optional `for<...>` syntax if present
+        if input.peek(Token![for]) {
+            input.parse::<Token![for]>()?;
+            input.parse::<Token![<]>()?;
+            let mut _parsed = Punctuated::new();
+            while !input.peek(Token![>]) {
+                _parsed.push_value(input.parse::<GenericParam>()?);
+                if input.peek(Token![,]) {
+                    _parsed.push_punct(input.parse::<Token![,]>()?);
+                } else {
+                    break;
+                }
+            }
+            input.parse::<Token![>]>()?;
+        }
+
         let typ = input.parse::<Type>()?;
         input.parse::<Token![:]>()?;
         let trait_path = input.parse::<Path>()?;

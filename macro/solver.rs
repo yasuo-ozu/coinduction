@@ -39,6 +39,10 @@ impl Constraint {
                 }) => {
                     let additional_predicates =
                         Self::map_bounds(bounds, bounded_ty, lifetimes.as_ref(), &mut f);
+                    let has_bounds = !bounds.is_empty();
+                    if has_bounds {
+                        wc.predicates.extend(core::iter::once(pair));
+                    }
                     wc.predicates.extend(additional_predicates);
                 }
                 _ => wc.predicates.extend(core::iter::once(pair)),

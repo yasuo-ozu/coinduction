@@ -4,6 +4,7 @@ use std::collections::{HashSet, VecDeque};
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::*;
+use template_quote::quote;
 
 use crate::matching::Matching;
 use crate::next_step::{next_step, NextStepArgs, NextStepKind};
@@ -25,26 +26,30 @@ impl Parse for CoinductionArgs {
 }
 
 pub fn coinduction(module: ItemMod, args: CoinductionArgs) -> TokenStream {
-    let target_items: Vec<&ItemImpl> = module
+    let (target_impls, other_contents): (Vec<ItemImpl>, Vec<Item>) = module
         .content
         .as_ref()
         .map(|c| &c.1)
         .into_iter()
         .flatten()
-        .filter_map(|item| match item {
-            Item::Impl(item_impl) if item_impl.trait_.is_some() => Some(item_impl),
-            _ => None,
-        })
-        .collect();
+        .fold(Default::default(), |(mut impls, mut others), item| {
+            match item {
+                Item::Impl(item_impl) if item_impl.trait_.is_some() => {
+                    impls.push(item_impl.clone())
+                }
+                other => others.push(other.clone()),
+            }
+            (impls, others)
+        });
     let working_traits: HashSet<_> = if args.paths.len() > 0 {
         args.paths.into_iter().collect()
     } else {
-        target_items
+        target_impls
             .iter()
             .filter_map(|ItemImpl { trait_, .. }| trait_.as_ref().map(|t| remove_path_args(&t.1)))
             .collect()
     };
-    let rewrite_rules = target_items
+    let rewrite_rules = target_impls
         .iter()
         .filter_map(|item_impl| {
             working_traits
@@ -81,7 +86,7 @@ pub fn coinduction(module: ItemMod, args: CoinductionArgs) -> TokenStream {
             _ => None,
         })
         .collect();
-    let solvers = target_items
+    let solvers = target_impls
         .iter()
         .map(|item_impl| {
             let constraint = Constraint {
@@ -161,7 +166,17 @@ pub fn coinduction(module: ItemMod, args: CoinductionArgs) -> TokenStream {
         working_traits: working_traits.into_iter().collect(),
         ignore_tys,
         solvers,
-        module,
+        target_impls,
     };
-    next_step(next_step_args)
+    let next = next_step(next_step_args);
+    quote! {
+        #(for attr in &module.attrs) {#attr}
+        #{ &module.vis }
+        #{ &module.unsafety }
+        #{ &module.mod_token }
+        #{ &module.ident } {
+            #(for content in other_contents) { #content }
+            #next
+        }
+    }
 }

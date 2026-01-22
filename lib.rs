@@ -18,3 +18,9 @@ pub use coinduction_macro::coinduction;
 
 #[doc(hidden)]
 pub use coinduction_macro::__next_step;
+
+#[doc(hidden)]
+/// Trait for referencing types with markers
+pub trait TypeRef<const RANDOM: u64, const IX0: usize, const IX: usize, ARG: ?Sized> {
+    type Type: ?Sized;
+}

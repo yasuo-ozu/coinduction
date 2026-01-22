@@ -146,7 +146,7 @@ pub struct NextStepArgs {
     pub working_traits: Vec<NoArgPath>,
     pub ignore_tys: HashSet<Ident>,
     pub solvers: Vec<Option<Solver>>,
-    pub module: ItemMod,
+    pub target_impls: Vec<ItemImpl>,
 }
 
 impl Parse for NextStepArgs {
@@ -234,8 +234,12 @@ impl Parse for NextStepArgs {
 
         input.parse::<Token![,]>()?;
 
-        // Parse module
-        let module: ItemMod = input.parse()?;
+        // Parse target_impls
+        let target_impls_bracket;
+        syn::bracketed!(target_impls_bracket in input);
+        let target_impls: Punctuated<ItemImpl, Token![,]> =
+            target_impls_bracket.parse_terminated(ItemImpl::parse, Token![,])?;
+        let target_impls: Vec<ItemImpl> = target_impls.into_iter().collect();
 
         Ok(NextStepArgs {
             kind,
@@ -244,7 +248,7 @@ impl Parse for NextStepArgs {
             working_traits,
             ignore_tys,
             solvers,
-            module,
+            target_impls,
         })
     }
 }
@@ -264,7 +268,7 @@ impl ToTokens for NextStepArgs {
             })
             .collect();
         let coinduction = &self.coinduction;
-        let module = &self.module;
+        let target_impls = &self.target_impls;
 
         tokens.extend(quote! {
             #PACKAGE_VERSION,
@@ -274,7 +278,7 @@ impl ToTokens for NextStepArgs {
             [#(#working_traits),*],
             [#(#ignore_tys),*],
             [#(#solver_tokens),*],
-            #module
+            [#(#target_impls),*]
         });
     }
 }
@@ -318,6 +322,22 @@ pub fn next_step(mut args: NextStepArgs) -> TokenStream {
                         NextStepKind::Typedef { predicates } => predicates
                             .iter()
                             .map(|(params, replacing, new_constraints)| {
+                                let mut replacing = replacing.clone();
+                                match (&mut replacing.typ, &target.typ) {
+                                    (
+                                        Type::Path(TypePath { qself: None, path: Path { leading_colon: None, segments } }),
+                                        Type::Path(TypePath{ path: Path { segments: target_segments, ..}, ..})
+                                    ) if segments.len() == 1 => {
+                                        let mut new_segments = target_segments.clone();
+                                        new_segments.last_mut().unwrap().arguments = segments.last().unwrap().arguments.clone();
+                                        *segments = new_segments
+                                    },
+                                    _ => unreachable!(),
+                                }
+                                if &replacing.trait_path.segments.last().unwrap().ident == &target.trait_path.segments.last().unwrap().ident {
+                                    let mut new_path = target.trait_path.clone();
+                                    new_path.segments.last_mut().unwrap().arguments = replacing.trait_path.segments.last().unwrap().arguments.clone();
+                                }
                                 replacing.matches(&target, &params).map(|substitute| {
                                     new_constraints.iter().map(move |new_constraint0| {
                                         let mut new_constraint = new_constraint0.clone();
@@ -393,26 +413,20 @@ pub fn next_step(mut args: NextStepArgs) -> TokenStream {
             #macro_path ! { #args }
         }
     } else {
-        let mut module = args.module.clone();
-        for (impl_item, solver) in module
-            .content
-            .as_mut()
-            .map(|c| &mut c.1)
-            .into_iter()
-            .flatten()
-            .filter_map(|item| match item {
-                Item::Impl(item_impl) if item_impl.trait_.is_some() => Some(item_impl),
-                _ => None,
-            })
+        let mut target_impls = args.target_impls.clone();
+        for (impl_item, solver) in target_impls
+            .iter_mut()
             .zip(&args.solvers)
             .filter_map(|(item_impl, solver)| solver.as_ref().map(|solver| (item_impl, solver)))
         {
             solver.graph.scope(|graph| {
                 let loops = gotgraph::algo::tarjan(graph)
-                    .map(|lp| {
-                        lp.iter()
-                            .map(|ix| (graph.node(*ix), *ix))
-                            .collect::<HashMap<_, _>>()
+                    .filter_map(|lp| {
+                        (lp.len() > 1).then_some(
+                            lp.iter()
+                                .map(|ix| (graph.node(*ix), *ix))
+                                .collect::<HashMap<_, _>>(),
+                        )
                     })
                     .collect::<Vec<_>>();
                 Constraint::map_generics(&mut impl_item.generics, |constraint| {
@@ -436,6 +450,10 @@ pub fn next_step(mut args: NextStepArgs) -> TokenStream {
                 });
             });
         }
-        quote! { #module }
+        quote! {
+            #(for content in target_impls) {
+                #content
+            }
+        }
     }
 }

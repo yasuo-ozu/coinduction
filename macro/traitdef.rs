@@ -3,18 +3,12 @@ use syn::*;
 use syn::{parse::Parse, parse::ParseStream, ItemTrait};
 use template_quote::quote;
 
-use crate::NoArgPath;
-
 pub struct TraitDefArgs {
-    #[allow(dead_code)]
-    pub coinduction: NoArgPath,
     pub rules: Vec<(TokenStream, TokenStream)>,
 }
 
 impl Parse for TraitDefArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        // let coinduction = crate::try_parse_coinduction_args(input)?;
-        let coinduction = parse2(quote! {::coinduction}).unwrap();
         let mut rules = Vec::new();
 
         while !input.is_empty() {
@@ -23,6 +17,11 @@ impl Parse for TraitDefArgs {
                 if input.is_empty() {
                     break;
                 }
+            }
+
+            // Check if we have a pattern rule starting with (
+            if !input.peek(syn::token::Paren) {
+                break;
             }
 
             // Parse rule pattern (token stream)
@@ -40,7 +39,7 @@ impl Parse for TraitDefArgs {
             rules.push((pattern, constraints));
         }
 
-        Ok(TraitDefArgs { coinduction, rules })
+        Ok(TraitDefArgs { rules })
     }
 }
 

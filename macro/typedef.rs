@@ -137,9 +137,9 @@ mod kw {
 }
 
 pub struct TypeDefArgs {
-    pub paths: Punctuated<NoArgPath, Token![,]>,
+    pub(crate) paths: Punctuated<NoArgPath, Token![,]>,
     #[allow(dead_code)]
-    pub coinduction: NoArgPath,
+    pub(crate) coinduction: NoArgPath,
     #[allow(dead_code)]
     pub marker: Option<syn::Path>,
 }
@@ -257,14 +257,14 @@ pub fn typedef(module: ItemMod, args: TypeDefArgs) -> TokenStream {
                             PathArguments::None
                         };
 
-                        let mut leaker = Leaker::with_generics(renamed_generics.clone());
-                        leaker.intern_with(|visitor| {
+                        let mut leaker = Leaker::new();
+                        leaker.intern_with(&renamed_generics, |visitor| {
                             #[allow(unused_imports)]
                             use syn::visit::Visit;
                             visitor.visit_path_arguments(&renamed_path_args);
                             visitor.visit_path(&renamed_trait_path);
-                        }).unwrap_or_else(|NotInternableError(span)| {
-                            abort!(span, "use absolute path");
+                        }).unwrap_or_else(|e: NotInternableError| {
+                            abort!(e.span(), "use absolute path");
                         });
                         leaker.reduce_roots();
                         let referrer = leaker.finish();

@@ -1,6 +1,6 @@
-use gotgraph::prelude::*;
 use proc_macro2::TokenStream;
 use proc_macro_error::abort;
+use safegraph::graph::Graph;
 use std::collections::VecDeque;
 use std::collections::{HashMap, HashSet};
 use syn::parse::{Parse, ParseStream};
@@ -142,8 +142,8 @@ impl ToTokens for NextStepKind {
 pub struct NextStepArgs {
     pub kind: NextStepKind,
     pub working_list: VecDeque<Constraint>,
-    pub coinduction: NoArgPath,
-    pub working_traits: Vec<NoArgPath>,
+    pub(crate) coinduction: NoArgPath,
+    pub(crate) working_traits: Vec<NoArgPath>,
     pub ignore_tys: HashSet<Ident>,
     pub solvers: Vec<Option<Solver>>,
     pub target_impls: Vec<ItemImpl>,
@@ -289,13 +289,11 @@ pub fn next_step(mut args: NextStepArgs) -> TokenStream {
     {
         for solver in args.solvers.iter_mut().filter_map(Option::as_mut) {
             solver.graph.scope_mut(|mut graph| {
-                let root_ix_opt = graph
-                    .node_pairs()
-                    .find(|(_, node)| {
-                        template_quote::quote!(#node).to_string()
-                            == template_quote::quote!(#target).to_string()
-                    })
-                    .map(|(ix, _)| ix);
+                let root_ix_opt = graph.node_indices().find(|ix| {
+                    let node = graph.node(*ix);
+                    template_quote::quote!(#node).to_string()
+                        == template_quote::quote!(#target).to_string()
+                });
 
                 if let Some(root_ix) = root_ix_opt {
                     let dep_constraints = match &args.kind {
@@ -354,9 +352,8 @@ pub fn next_step(mut args: NextStepArgs) -> TokenStream {
 
                     for (new_constraint, additional_params) in dep_constraints {
                         let existing_ix_opt = graph
-                            .node_pairs()
-                            .find(|(_, c)| *c == &new_constraint)
-                            .map(|(ix, _)| ix);
+                            .node_indices()
+                            .find(|ix| graph.node(*ix) == &new_constraint);
                         if existing_ix_opt.is_none() {
                             let not_in_working_list = !args.working_list.contains(&new_constraint);
 
@@ -393,13 +390,13 @@ pub fn next_step(mut args: NextStepArgs) -> TokenStream {
                                 args.working_list.push_back(new_constraint.clone());
                             }
                         }
-                        let target_ix =
-                            existing_ix_opt.unwrap_or_else(|| graph.add_node(new_constraint));
+                        let target_ix = existing_ix_opt
+                            .unwrap_or_else(|| graph.insert_node(new_constraint).unwrap());
                         let edge_exists = graph
-                            .outgoing_edge_indices(root_ix)
-                            .any(|edge_ix| graph.endpoints(edge_ix)[1] == target_ix);
+                            .edge_indices_from(root_ix)
+                            .any(|edge_ix| graph.edge_head_index(edge_ix) == target_ix);
                         if !edge_exists {
-                            graph.add_edge((), root_ix, target_ix);
+                            graph.insert_edge((), [root_ix, target_ix]).unwrap();
                         }
                     }
                 }
@@ -420,7 +417,7 @@ pub fn next_step(mut args: NextStepArgs) -> TokenStream {
             .filter_map(|(item_impl, solver)| solver.as_ref().map(|solver| (item_impl, solver)))
         {
             solver.graph.scope(|graph| {
-                let loops = gotgraph::algo::tarjan(graph)
+                let loops = safegraph::algo::connectivity::tarjan_scc(graph)
                     .filter_map(|lp| {
                         (lp.len() > 1).then_some(
                             lp.iter()
@@ -435,8 +432,8 @@ pub fn next_step(mut args: NextStepArgs) -> TokenStream {
                             .values()
                             .map(|ix| {
                                 graph
-                                    .outgoing_edge_indices(*ix)
-                                    .map(|eix| graph.endpoints(eix)[1])
+                                    .edge_indices_from(*ix)
+                                    .map(|eix| graph.edge_head_index(eix))
                             })
                             .flatten()
                             .collect::<HashSet<_>>();

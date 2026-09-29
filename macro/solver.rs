@@ -1,6 +1,6 @@
-use gotgraph::graph::{Graph, GraphUpdate};
-use gotgraph::prelude::VecGraph;
 use proc_macro_error::abort;
+use safegraph::graph::Graph;
+use safegraph::VecGraph;
 use std::collections::HashSet;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
@@ -214,23 +214,25 @@ impl Parse for Solver {
             params_content.parse_terminated(GenericParam::parse, Token![,])?;
         // Add vertices
         let mut graph = VecGraph::default();
-        for vertex in &vertices {
-            graph.add_node(vertex.clone());
-        }
-        // Add edges
-        for edge_tuple in &edge_tuples {
-            let from_id = graph
-                .node_pairs()
-                .find(|(_, v)| **v == edge_tuple.from)
-                .map(|(id, _)| id);
-            let to_id = graph
-                .node_pairs()
-                .find(|(_, v)| **v == edge_tuple.to)
-                .map(|(id, _)| id);
-            let from_id = from_id.unwrap_or_else(|| graph.add_node(edge_tuple.from.clone()));
-            let to_id = to_id.unwrap_or_else(|| graph.add_node(edge_tuple.to.clone()));
-            graph.add_edge((), from_id, to_id);
-        }
+        graph.scope_mut(|mut graph| {
+            for vertex in &vertices {
+                graph.insert_node(vertex.clone()).unwrap();
+            }
+            // Add edges
+            for edge_tuple in &edge_tuples {
+                let from_id = graph
+                    .node_indices()
+                    .find(|id| *graph.node(*id) == edge_tuple.from);
+                let to_id = graph
+                    .node_indices()
+                    .find(|id| *graph.node(*id) == edge_tuple.to);
+                let from_id =
+                    from_id.unwrap_or_else(|| graph.insert_node(edge_tuple.from.clone()).unwrap());
+                let to_id =
+                    to_id.unwrap_or_else(|| graph.insert_node(edge_tuple.to.clone()).unwrap());
+                graph.insert_edge((), [from_id, to_id]).unwrap();
+            }
+        });
         Ok(Solver {
             graph,
             generic_params: generic_param_list.into_iter().collect(),
@@ -241,26 +243,28 @@ impl Parse for Solver {
 impl ToTokens for Solver {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         // Only emit orphan vertices (vertices with no incoming or outgoing edges)
-        let orphan_vertices: Vec<_> = self
-            .graph
-            .node_pairs()
-            .filter(|(node_id, _)| {
-                self.graph.incoming_edge_indices(*node_id).count() == 0
-                    && self.graph.outgoing_edge_indices(*node_id).count() == 0
-            })
-            .map(|(_, vertex)| vertex)
-            .cloned()
-            .collect();
+        let (orphan_vertices, edges) = self.graph.scope(|graph| {
+            let orphan_vertices: Vec<_> = graph
+                .node_indices()
+                .filter(|node_id| {
+                    graph.edge_indices_to(*node_id).count() == 0
+                        && graph.edge_indices_from(*node_id).count() == 0
+                })
+                .map(|node_id| graph.node(node_id).clone())
+                .collect();
 
-        // Serialize edges as tuples of constraints
-        let mut edges = Vec::new();
-        for edge_idx in self.graph.edge_indices() {
-            let endpoints = self.graph.endpoints(edge_idx);
-            let [from_idx, to_idx] = endpoints;
-            let from_constraint = self.graph.node(from_idx);
-            let to_constraint = self.graph.node(to_idx);
-            edges.push((from_constraint.clone(), to_constraint.clone()));
-        }
+            // Serialize edges as tuples of constraints
+            let edges: Vec<_> = graph
+                .edge_indices()
+                .map(|edge_idx| {
+                    (
+                        graph.edge_tail(edge_idx).clone(),
+                        graph.edge_head(edge_idx).clone(),
+                    )
+                })
+                .collect();
+            (orphan_vertices, edges)
+        });
 
         let generic_params: Vec<_> = self.generic_params.iter().collect();
 

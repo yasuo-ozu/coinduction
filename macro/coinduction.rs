@@ -1,5 +1,5 @@
-use gotgraph::prelude::*;
 use proc_macro2::TokenStream;
+use safegraph::graph::Graph;
 use std::collections::{HashSet, VecDeque};
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
@@ -12,8 +12,8 @@ use crate::solver::{Constraint, Solver};
 use crate::{remove_path_args, NoArgPath};
 
 pub struct CoinductionArgs {
-    pub paths: Punctuated<NoArgPath, Token![,]>,
-    pub coinduction: NoArgPath,
+    pub(crate) paths: Punctuated<NoArgPath, Token![,]>,
+    pub(crate) coinduction: NoArgPath,
 }
 
 impl Parse for CoinductionArgs {
@@ -102,7 +102,7 @@ pub fn coinduction(module: ItemMod, args: CoinductionArgs) -> TokenStream {
             };
 
             solver.graph.scope_mut(|mut graph| {
-                let root_node = graph.add_node(constraint.clone());
+                let root_node = graph.insert_node(constraint.clone()).unwrap();
                 let mut local_working_list = VecDeque::new();
                 local_working_list.push_back(root_node);
                 let mut iteration_count = 0;
@@ -139,17 +139,16 @@ pub fn coinduction(module: ItemMod, args: CoinductionArgs) -> TokenStream {
                             for mut new_constraint in rule_constraints.clone() {
                                 new_constraint.replace(&substitution);
                                 let existing_node = graph
-                                    .node_pairs()
-                                    .find(|(_, c)| **c == new_constraint)
-                                    .map(|(id, _)| id);
+                                    .node_indices()
+                                    .find(|id| *graph.node(*id) == new_constraint);
                                 let new_node_id = if let Some(id) = existing_node {
                                     id
                                 } else {
-                                    let n = graph.add_node(new_constraint.clone());
+                                    let n = graph.insert_node(new_constraint.clone()).unwrap();
                                     local_working_list.push_back(n);
                                     n
                                 };
-                                graph.add_edge((), node_id, new_node_id);
+                                graph.insert_edge((), [node_id, new_node_id]).unwrap();
                             }
                             break;
                         }

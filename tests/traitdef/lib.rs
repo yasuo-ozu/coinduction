@@ -2,43 +2,36 @@ use coinduction::traitdef;
 use std::fmt::Debug;
 use std::hash::Hash;
 
-pub struct TestMarker;
-pub struct LocalMarker;
-pub struct CoinductionTestMarker;
-
 // Local trait that exists only in this crate
 #[traitdef(
-    ([$T:ty; $N:expr]) => { $T: Clone + Default },
-    ([$T:ty]) => { $T: PartialEq + Clone },
-    (($T:ty, $U:ty)) => { $T: Clone + Send, $U: Sync + Default },
-    (($T:ty, $U:ty, $V:ty)) => { $T: Clone + Send, $U: Sync, $V: Default + Send }
+    ([$T:ty; $N:expr]) => { $T: ::core::clone::Clone + ::core::default::Default },
+    ([$T:ty]) => { $T: ::core::cmp::PartialEq + ::core::clone::Clone },
+    (($T:ty, $U:ty)) => { $T: ::core::clone::Clone + ::core::marker::Send, $U: ::core::marker::Sync + ::core::default::Default },
+    (($T:ty, $U:ty, $V:ty)) => { $T: ::core::clone::Clone + ::core::marker::Send, $U: ::core::marker::Sync, $V: ::core::default::Default + ::core::marker::Send }
 )]
 pub trait LocalTrait {
     fn local_method(&self) -> usize;
 }
 
 #[traitdef(
-    marker = TestMarker,
-    (($T:ty, $U:ty)) => { $T: Clone + Send, $U: Debug + Default },
-    (($T:ty, $U:ty, $V:ty)) => { $T: Send + Sync, $U: Clone, $V: Debug + Hash }
+    (($T:ty, $U:ty)) => { $T: ::core::clone::Clone + ::core::marker::Send, $U: ::core::fmt::Debug + ::core::default::Default },
+    (($T:ty, $U:ty, $V:ty)) => { $T: ::core::marker::Send + ::core::marker::Sync, $U: ::core::clone::Clone, $V: ::core::fmt::Debug + ::core::hash::Hash }
 )]
 pub trait TestTrait {
     fn test_method(&self) -> String;
 }
 
 #[traitdef(
-    marker = LocalMarker,
-    ([$T:ty; $N:expr]) => { $T: Clone + Send + Sync },
-    (($T:ty, $U:ty)) => { $T: Default + Clone, $U: Send + Sync }
+    ([$T:ty; $N:expr]) => { $T: ::core::clone::Clone + ::core::marker::Send + ::core::marker::Sync },
+    (($T:ty, $U:ty)) => { $T: ::core::default::Default + ::core::clone::Clone, $U: ::core::marker::Send + ::core::marker::Sync }
 )]
 pub trait CircularTrait {
     fn circular_method(&self) -> Box<dyn CircularTrait>;
 }
 
 #[traitdef(
-    marker = CoinductionTestMarker,
-    ([$T:ty]) => { $T: PartialEq + Clone },
-    (($T:ty, $U:ty, $V:ty)) => { $T: Hash + Eq, $U: Debug + Clone, $V: Send + Sync }
+    ([$T:ty]) => { $T: ::core::cmp::PartialEq + ::core::clone::Clone },
+    (($T:ty, $U:ty, $V:ty)) => { $T: ::core::hash::Hash + ::core::cmp::Eq, $U: ::core::fmt::Debug + ::core::clone::Clone, $V: ::core::marker::Send + ::core::marker::Sync }
 )]
 pub trait ExtendedTrait {
     fn extended_method(&self) -> bool;
@@ -171,4 +164,3 @@ where
         hasher.finish() % 2 == 0
     }
 }
-

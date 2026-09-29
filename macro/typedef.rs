@@ -1,277 +1,375 @@
-use crate::common::TypeConstraint;
-use proc_macro::TokenStream;
-use syn::{parse_macro_input, Item, ItemImpl, ItemMod, Path};
+use proc_macro2::{Span, TokenStream};
+use proc_macro_error::*;
+use std::collections::{HashMap, HashSet};
+use syn::parse::{Parse, ParseStream};
+use syn::punctuated::Punctuated;
+use syn::spanned::Spanned;
+use syn::*;
 use template_quote::quote;
+use type_leak::{Leaker, NotInternableError};
 
-#[derive(Debug)]
-struct TypeDefArgs {
-    trait_paths: Vec<Path>,
-    coinduction_path: Path,
-    marker_path: Option<Path>,
+use crate::remove_path_args;
+use crate::solver::Constraint;
+use crate::NoArgPath;
+
+/// Renames generic parameters to avoid collisions between different impl blocks.
+/// Returns the rename map and modifies the inputs in place.
+fn randomize_generic_params(
+    generics: &mut Generics,
+    self_ty: &mut Type,
+    trait_path: &mut Path,
+    ix0: usize,
+    random_suffix: u64,
+) -> HashMap<Ident, Ident> {
+    // Build rename map and rename param declarations
+    let rename_map: HashMap<Ident, Ident> = generics
+        .params
+        .iter_mut()
+        .filter_map(|param| {
+            match param {
+                GenericParam::Type(tp) => {
+                    let old = tp.ident.clone();
+                    let new = Ident::new(
+                        &format!("__{}_{}_{}", old, ix0, random_suffix),
+                        old.span(),
+                    );
+                    tp.ident = new.clone();
+                    Some((old, new))
+                }
+                GenericParam::Lifetime(lp) => {
+                    let old = lp.lifetime.ident.clone();
+                    let new = Ident::new(
+                        &format!("__{}_{}_{}", old, ix0, random_suffix),
+                        old.span(),
+                    );
+                    lp.lifetime.ident = new.clone();
+                    Some((old, new))
+                }
+                GenericParam::Const(cp) => {
+                    let old = cp.ident.clone();
+                    let new = Ident::new(
+                        &format!("__{}_{}_{}", old, ix0, random_suffix),
+                        old.span(),
+                    );
+                    cp.ident = new.clone();
+                    Some((old, new))
+                }
+            }
+        })
+        .collect();
+
+    // Visitor for renaming generic parameter usages
+    struct ParamRenamer<'a>(&'a HashMap<Ident, Ident>);
+
+    impl syn::visit_mut::VisitMut for ParamRenamer<'_> {
+        fn visit_type_mut(&mut self, ty: &mut Type) {
+            syn::visit_mut::visit_type_mut(self, ty);
+            if let Type::Path(TypePath { qself: None, path }) = ty {
+                if path.leading_colon.is_none()
+                    && path.segments.len() == 1
+                    && matches!(path.segments[0].arguments, PathArguments::None)
+                {
+                    if let Some(new) = self.0.get(&path.segments[0].ident) {
+                        path.segments[0].ident = new.clone();
+                    }
+                }
+            }
+        }
+
+        fn visit_lifetime_mut(&mut self, lt: &mut Lifetime) {
+            if let Some(new) = self.0.get(&lt.ident) {
+                lt.ident = new.clone();
+            }
+            syn::visit_mut::visit_lifetime_mut(self, lt);
+        }
+
+        fn visit_expr_mut(&mut self, expr: &mut Expr) {
+            syn::visit_mut::visit_expr_mut(self, expr);
+            if let Expr::Path(ExprPath { qself: None, path, .. }) = expr {
+                if path.leading_colon.is_none()
+                    && path.segments.len() == 1
+                    && matches!(path.segments[0].arguments, PathArguments::None)
+                {
+                    if let Some(new) = self.0.get(&path.segments[0].ident) {
+                        path.segments[0].ident = new.clone();
+                    }
+                }
+            }
+        }
+    }
+
+    // Apply renaming
+    use syn::visit_mut::VisitMut;
+    let mut renamer = ParamRenamer(&rename_map);
+
+    // Rename in generics bounds and where clause
+    for param in generics.params.iter_mut() {
+        match param {
+            GenericParam::Type(tp) => {
+                for bound in tp.bounds.iter_mut() {
+                    renamer.visit_type_param_bound_mut(bound);
+                }
+            }
+            GenericParam::Lifetime(lp) => {
+                for bound in lp.bounds.iter_mut() {
+                    renamer.visit_lifetime_mut(bound);
+                }
+            }
+            GenericParam::Const(cp) => {
+                renamer.visit_type_mut(&mut cp.ty);
+            }
+        }
+    }
+    if let Some(wc) = generics.where_clause.as_mut() {
+        renamer.visit_where_clause_mut(wc);
+    }
+
+    // Rename in self_ty and trait_path
+    renamer.visit_type_mut(self_ty);
+    renamer.visit_path_mut(trait_path);
+
+    rename_map
 }
 
-impl syn::parse::Parse for TypeDefArgs {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let mut trait_paths = Vec::new();
-        let mut coinduction_path = syn::parse_quote! { ::coinduction };
-        let mut marker_path = None;
+mod kw {
+    syn::custom_keyword!(marker);
+    syn::custom_keyword!(coinduction);
+}
+
+pub struct TypeDefArgs {
+    pub paths: Punctuated<NoArgPath, Token![,]>,
+    #[allow(dead_code)]
+    pub coinduction: NoArgPath,
+    #[allow(dead_code)]
+    pub marker: Option<syn::Path>,
+}
+
+impl Parse for TypeDefArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let coinduction = crate::try_parse_coinduction_args(input)?;
+        let mut marker = None;
+        let mut paths = Punctuated::new();
 
         while !input.is_empty() {
-            if input.peek(syn::Ident) && input.peek2(syn::Token![=]) {
-                let name: syn::Ident = input.parse()?;
-                let _: syn::Token![=] = input.parse()?;
+            // Check for marker = ...
+            if input.peek(kw::marker) && input.peek2(Token![=]) {
+                input.parse::<kw::marker>()?;
+                input.parse::<Token![=]>()?;
+                marker = Some(input.parse()?);
 
-                if name == "coinduction" {
-                    coinduction_path = input.parse()?;
-                } else if name == "marker" {
-                    marker_path = Some(input.parse()?);
-                } else {
-                    return Err(syn::Error::new_spanned(name, "Unknown argument"));
+                if input.peek(Token![,]) {
+                    input.parse::<Token![,]>()?;
                 }
-            } else {
-                trait_paths.push(input.parse()?);
+                continue;
             }
 
-            if !input.is_empty() {
-                let _: syn::Token![,] = input.parse()?;
+            // Parse path
+            let path: NoArgPath = input.parse()?;
+            paths.push(path);
+
+            if input.peek(Token![,]) {
+                input.parse::<Token![,]>()?;
+            } else {
+                break;
             }
         }
 
         Ok(TypeDefArgs {
-            trait_paths,
-            coinduction_path,
-            marker_path,
+            paths,
+            coinduction,
+            marker,
         })
     }
 }
 
-pub fn typedef_impl(args: TokenStream, input: TokenStream) -> TokenStream {
+pub fn typedef(module: ItemMod, args: TypeDefArgs) -> TokenStream {
+    let random_suffix = crate::get_random();
     let crate_version = env!("CARGO_PKG_VERSION");
-    let args = parse_macro_input!(args as TypeDefArgs);
-    let module = parse_macro_input!(input as ItemMod);
-
-    let items = match &module.content {
-        Some((_, items)) => items,
-        None => {
-            return syn::Error::new_spanned(module, "Module must have content")
-                .to_compile_error()
-                .into()
-        }
-    };
-
-    // Only validate traits when explicitly provided as arguments
-    // Auto-detected traits don't need validation since they're defined in the same module
-    let trait_validations = if !args.trait_paths.is_empty() {
-        args.trait_paths.iter().filter_map(|trait_path| {
-            // Validate all trait paths, but extract the final segment for the macro call
-            if let Some(last_segment) = trait_path.segments.last() {
-                // Check that the final segment has no generics
-                if last_segment.arguments.is_empty() {
-                    let trait_name = &last_segment.ident;
-                    Some(quote! {
-                        const _: () = {
-                            // Version check
-                            #trait_name! { @version_check #crate_version }
-
-                            macro_rules! this_trait_is_not_defined_with_coinduction_traitdef {
-                                () => {
-                                    #trait_name! { trait [#trait_path] is not defined with #[coinduction::traitdef] macro, so is not used as an argument for #[typedef] macro }
-                                };
-                            }
-                            this_trait_is_not_defined_with_coinduction_traitdef!();
-                        };
-                    })
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        }).collect()
+    let content = module
+        .content
+        .as_ref()
+        .map(|c| &c.1)
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    let working_traits: HashSet<_> = if args.paths.len() > 0 {
+        args.paths.into_iter().collect()
     } else {
-        Vec::new()
+        content
+            .iter()
+            .filter_map(|item| match item {
+                Item::Impl(item_impl) => Some(item_impl),
+                _ => None,
+            })
+            .filter_map(|ItemImpl { trait_, .. }| trait_.as_ref().map(|t| remove_path_args(&t.1)))
+            .collect()
     };
-
-    // Find type definitions and their corresponding impls
-    let mut type_macros = Vec::new();
-
-    for item in items.iter() {
-        match item {
-            Item::Struct(struct_item) => {
-                if let Some(type_macro) = generate_type_macro(&struct_item.ident, items, &args) {
-                    type_macros.push(type_macro);
-                }
-            }
-            Item::Enum(enum_item) => {
-                if let Some(type_macro) = generate_type_macro(&enum_item.ident, items, &args) {
-                    type_macros.push(type_macro);
-                }
-            }
-            Item::Union(union_item) => {
-                if let Some(type_macro) = generate_type_macro(&union_item.ident, items, &args) {
-                    type_macros.push(type_macro);
-                }
-            }
-            Item::Type(type_alias) => {
-                if let Some(type_macro) = generate_type_macro(&type_alias.ident, items, &args) {
-                    type_macros.push(type_macro);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let coinduction_path = &args.coinduction_path;
-
-    // Generate TypeRef implementation if marker_path is provided
-    let typeref_impl = if let Some(marker_path) = &args.marker_path {
-        quote! {
-            impl<T: ?Sized> #coinduction_path::TypeRef<T> for #marker_path {
-                type Type = T;
-            }
-        }
-    } else {
-        quote! {}
-    };
-
-    let result = quote! {
-        // Validate all traits are defined with #[traitdef]
-        #(#trait_validations)*
-
-        #module
-
-        #typeref_impl
-
-        #(#type_macros)*
-    };
-
-    result.into()
-}
-
-fn generate_type_macro(
-    type_ident: &syn::Ident,
-    items: &[Item],
-    args: &TypeDefArgs,
-) -> Option<proc_macro2::TokenStream> {
-    // Find impl blocks for this type that implement our target traits
-    let mut impl_constraints = Vec::new();
-
-    for item in items.iter() {
-        if let Item::Impl(impl_item) = item {
-            if let Some((_, trait_path, _)) = &impl_item.trait_ {
-                // Check if this impl is for our type and target trait
-                if is_impl_for_type(impl_item, type_ident)
-                    && args
-                        .trait_paths
-                        .iter()
-                        .any(|tp| paths_equal(tp, trait_path))
-                {
-                    // Extract constraints from this impl
-                    if let Ok(constraints) = extract_impl_constraints(impl_item) {
-                        impl_constraints.extend(constraints);
-                    }
-                }
-            }
-        }
-    }
-
-    if impl_constraints.is_empty() {
-        return None;
-    }
-
-    let coinduction_path = &args.coinduction_path;
-
-    // Create a random identifier with __ prefix
-    let random_suffix = std::process::id(); // Use process ID for uniqueness
-    let temporal_mac_name = syn::Ident::new(
-        &format!("__{}_temporal_{}", type_ident, random_suffix),
-        type_ident.span(),
-    );
-
-    Some(quote! {
-        #[allow(unused_macros, unused_imports, dead_code, non_local_definitions)]
-        #[doc(hidden)]
-        #[macro_export]
-        macro_rules! #temporal_mac_name {
-            // Handle the full macro arguments from recurse/internal
-            ($module:item, $working_list:expr, $target_constraint:expr, $trait_names:expr, $graphs:expr) => {
-                #coinduction_path::__internal! {
-                    $module, $working_list, $target_constraint, $trait_names, $graphs, vec![#(#impl_constraints),*]
-                }
-            };
-
-            // Simple fallback for direct invocation
-            ($target:ty) => {
-                #coinduction_path::__internal! {
-                    mod empty {}, vec![], (), vec![], vec![], vec![#(#impl_constraints),*]
-                }
-            };
-        }
-
-        #[doc(hidden)]
-        #[allow(unused_imports, unused_macros, dead_code)]
-        pub use #temporal_mac_name as #type_ident;
-    })
-}
-
-fn is_impl_for_type(impl_item: &ItemImpl, type_ident: &syn::Ident) -> bool {
-    match &*impl_item.self_ty {
-        syn::Type::Path(type_path) => type_path
-            .path
-            .segments
-            .last()
-            .map(|seg| seg.ident == *type_ident)
-            .unwrap_or(false),
-        _ => false,
-    }
-}
-
-fn extract_impl_constraints(impl_item: &ItemImpl) -> syn::Result<Vec<TypeConstraint>> {
-    let mut constraints = Vec::new();
-
-    // Extract from generic parameters
-    for param in &impl_item.generics.params {
-        if let syn::GenericParam::Type(type_param) = param {
-            for bound in &type_param.bounds {
-                if let syn::TypeParamBound::Trait(trait_bound) = bound {
-                    constraints.push(TypeConstraint {
-                        ty: syn::Type::Path(syn::TypePath {
-                            qself: None,
-                            path: type_param.ident.clone().into(),
-                        }),
-                        trait_path: trait_bound.path.clone(),
-                    });
-                }
-            }
-        }
-    }
-
-    // Extract from where clause
-    if let Some(where_clause) = &impl_item.generics.where_clause {
-        for predicate in &where_clause.predicates {
-            if let syn::WherePredicate::Type(type_predicate) = predicate {
-                for bound in &type_predicate.bounds {
-                    if let syn::TypeParamBound::Trait(trait_bound) = bound {
-                        constraints.push(TypeConstraint {
-                            ty: type_predicate.bounded_ty.clone(),
-                            trait_path: trait_bound.path.clone(),
-                        });
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(constraints)
-}
-
-fn paths_equal(a: &Path, b: &Path) -> bool {
-    if a.segments.len() != b.segments.len() {
-        return false;
-    }
-
-    a.segments
+    let type_idents = content
         .iter()
-        .zip(b.segments.iter())
-        .all(|(seg_a, seg_b)| seg_a.ident == seg_b.ident)
+        .filter_map(|item| match item {
+            Item::Enum(ItemEnum { vis, ident, .. })
+            | Item::Struct(ItemStruct { vis, ident, .. })
+            | Item::Union(ItemUnion { vis, ident, .. }) => Some((ident.clone(), vis.clone())),
+            _ => None,
+        })
+        .collect::<HashMap<_, _>>();
+    let (_typeref_impl, type_impl_table) = content.iter().enumerate().fold(
+        Default::default(),
+        |(mut typeref_impl, mut acc): (TokenStream, HashMap<Ident, Vec<(Generics, Constraint, Vec<Constraint>)>>),
+         (ix0, item)| {
+            if let Item::Impl(ItemImpl {
+                trait_: Some((_, trait_path, _)),
+                generics,
+                self_ty,
+                ..
+            }) = item
+            {
+                match self_ty.as_ref() {
+                    Type::Path(TypePath {
+                        qself: None,
+                        path:
+                            Path {
+                                leading_colon: None,
+                                segments,
+                            },
+                    }) if segments.len() == 1
+                        && working_traits.contains(&remove_path_args(trait_path)) =>
+                    {
+                        // Extract type identifier before modifications
+                        let type_ident = segments[0].ident.clone();
+
+                        // Clone and randomize generic parameter names to avoid collisions
+                        let mut renamed_generics = generics.clone();
+                        let mut renamed_self_ty = self_ty.as_ref().clone();
+                        let mut renamed_trait_path = trait_path.clone();
+                        let _rename_map = randomize_generic_params(
+                            &mut renamed_generics,
+                            &mut renamed_self_ty,
+                            &mut renamed_trait_path,
+                            ix0,
+                            random_suffix,
+                        );
+
+                        // Extract renamed path arguments for the leaker
+                        let renamed_path_args = if let Type::Path(TypePath { path, .. }) = &renamed_self_ty {
+                            path.segments.last().unwrap().arguments.clone()
+                        } else {
+                            PathArguments::None
+                        };
+
+                        let mut leaker = Leaker::with_generics(renamed_generics.clone());
+                        leaker.intern_with(|visitor| {
+                            #[allow(unused_imports)]
+                            use syn::visit::Visit;
+                            visitor.visit_path_arguments(&renamed_path_args);
+                            visitor.visit_path(&renamed_trait_path);
+                        }).unwrap_or_else(|NotInternableError(span)| {
+                            abort!(span, "use absolute path");
+                        });
+                        leaker.reduce_roots();
+                        let referrer = leaker.finish();
+                        let typeref_arg = type_leak::encode_generics_params_to_ty(&renamed_generics.params);
+
+                        let mut constraint = Constraint {
+                            typ: renamed_self_ty.clone(),
+                            trait_path: renamed_trait_path.clone()
+                        };
+                        let mut children = Vec::new();
+                        Constraint::map_generics(&mut renamed_generics.clone(), |c| {
+                            children.push(c.clone());
+                            vec![c]
+                        });
+
+                        if !referrer.is_empty() {
+                            let marker = args.marker.as_ref().unwrap_or_else(|| {
+                                let first = referrer.iter().next().unwrap();
+                                abort!(
+                                    Span::call_site(), "specify 'marker = ' argument";
+                                    hint = first.span() => "or make this path absolute";
+                                );
+                            });
+                            let mut visitor = referrer.clone().into_visitor(|_ty, ix| {
+                                parse2(quote!(
+                                        <#marker as #{&args.coinduction}::TypeRef<#random_suffix, #ix0, #ix, #typeref_arg>>::Type
+                                )).unwrap()
+                            });
+                            use syn::visit_mut::VisitMut;
+                            visitor.visit_type_mut(&mut constraint.typ);
+                            visitor.visit_path_mut(&mut constraint.trait_path);
+                            typeref_impl = quote!(
+                                #typeref_impl
+                                #(for (ix, ty) in referrer.iter().enumerate()) {
+                                    impl #{renamed_generics.split_for_impl().0}
+                                    #{&args.coinduction}::TypeRef<#random_suffix, #ix0, #ix, #typeref_arg> for #marker {
+                                        type Type = #ty;
+                                    }
+                                }
+                            );
+                            for child in children.iter_mut() {
+                                visitor.visit_type_mut(&mut child.typ);
+                                visitor.visit_path_mut(&mut child.trait_path);
+                            }
+                        }
+
+                        acc.entry(type_ident).or_default().push((
+                            renamed_generics.clone(),
+                            constraint,
+                            children
+                        ));
+                    }
+                    _ => (),
+                }
+            }
+            (quote!(#typeref_impl), acc)
+        },
+    );
+    let macros = type_impl_table
+        .iter()
+        .fold(TokenStream::new(), |acc, (ty_ident, impls)| {
+            let temporal_mac_name = syn::Ident::new(
+                &format!("__{}_temporal_{}", &ty_ident, random_suffix),
+                ty_ident.span(),
+            );
+            let vis = type_idents
+                .get(&ty_ident)
+                .cloned()
+                .unwrap_or(Visibility::Public(Default::default()));
+            quote! {
+                #acc
+
+                #[allow(unused_macros, unused_imports, dead_code, non_local_definitions)]
+                #[doc(hidden)]
+                #[macro_export]
+                macro_rules! #temporal_mac_name {
+                    (#crate_version, None, [$($wt:tt)*], {$($coinduction:tt)+}, $($t:tt)*) => {
+                        $($coinduction)+::__next_step! {
+                            #crate_version, Typedef {
+                                predicates: [
+                                    #(for (generics, constraint, children) in impls), {
+                                        (
+                                            [ #(for p in &generics.params), {#p} ],
+                                            #constraint,
+                                            [ #(for c in children), { #c } ]
+                                        )
+                                    }
+                                ]
+                            }, [$($wt)*], {$($coinduction)+}, $($t)*
+                        }
+                    }
+                }
+
+                #[doc(hidden)]
+                #[allow(unused_imports, unused_macros, dead_code)]
+                #vis use #temporal_mac_name as #ty_ident;
+            }
+        });
+    quote! {
+        #(for attr in &module.attrs) { #attr }
+        #{&module.vis} #{&module.unsafety} #{&module.mod_token} #{&module.ident} {
+            #(for item in &content) {
+                #item
+            }
+            #macros
+        }
+    }
 }

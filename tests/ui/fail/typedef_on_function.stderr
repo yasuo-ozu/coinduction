@@ -1,5 +1,0 @@
-error: expected `mod`
-  --> tests/ui/fail/typedef_on_function.rs:11:1
-   |
-11 | fn not_a_module() {
-   | ^^

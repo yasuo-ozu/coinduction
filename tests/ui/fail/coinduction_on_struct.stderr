@@ -1,5 +1,0 @@
-error: expected `mod`
-  --> tests/ui/fail/coinduction_on_struct.rs:11:1
-   |
-11 | struct NotAModule {
-   | ^^^^^^

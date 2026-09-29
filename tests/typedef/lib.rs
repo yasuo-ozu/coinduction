@@ -43,10 +43,8 @@ pub mod generic_types {
 
     impl<T, U> TestTrait for Container<T, U>
     where
-        T: Clone + Debug + Send,
-        U: Debug + Default + Sync,
-        TypedefMarker: coinduction::TypeRef<Container<T, U>>,
-        TypedefMarker: coinduction::TypeRef<Wrapper<T>>,
+        T: Clone + ::std::fmt::Debug + Send,
+        U: ::std::fmt::Debug + Default + Sync,
     {
         fn test_method(&self) -> String {
             format!("{:?}", self.first)
@@ -65,7 +63,7 @@ pub mod generic_types {
     impl<T, U> LocalTrait for Container<T, U>
     where
         T: Clone + Send + Sync,
-        U: Debug + Hash,
+        U: ::std::fmt::Debug + Hash,
     {
         fn local_method(&self) -> usize {
             let _ = self.first.clone();
@@ -75,7 +73,7 @@ pub mod generic_types {
 
     impl<T> LocalTrait for Wrapper<T>
     where
-        T: Clone + Debug + Default,
+        T: Clone + ::std::fmt::Debug + Default,
     {
         fn local_method(&self) -> usize {
             let _ = T::default();
@@ -85,9 +83,9 @@ pub mod generic_types {
 
     impl<T, U, V> CircularTrait for MultiGeneric<T, U, V>
     where
-        T: Clone + Debug + Send + 'static,
+        T: Clone + ::std::fmt::Debug + Send + 'static,
         U: Send + Sync + Default,
-        V: Debug + Hash + Clone,
+        V: ::std::fmt::Debug + Hash + Clone,
     {
         fn circular_method(&self) -> Box<dyn CircularTrait> {
             Box::new(ConstrainedStruct {
@@ -99,7 +97,7 @@ pub mod generic_types {
     impl<T> CircularTrait for ConstrainedStruct<T>
     where
         T: Iterator + Clone + Send,
-        T::Item: Debug,
+        T::Item: ::std::fmt::Debug,
     {
         fn circular_method(&self) -> Box<dyn CircularTrait> {
             Box::new(MultiGeneric {
@@ -125,7 +123,7 @@ pub mod generic_types {
     where
         T: Clone + PartialOrd,
         U: Send + Sync + Clone,
-        V: Debug + Hash + Default,
+        V: ::std::fmt::Debug + Hash + Default,
     {
         fn extended_method(&self) -> bool {
             let _ = V::default();

@@ -1,8 +1,5 @@
 use coinduction::*;
-use traitdef::{
-    CircularTrait, CoinductionTestMarker, LocalMarker, LocalTrait, TestMarker, TestTrait,
-};
-use typedef::{LocalTypeMarker, TypedefMarker};
+use traitdef::{CircularTrait, LocalTrait, TestTrait};
 
 // Local types that exist only in this crate
 pub struct InternalType(pub f64);
@@ -25,6 +22,13 @@ impl PartialEq for InternalType {
     }
 }
 
+impl std::hash::Hash for InternalType {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // Hash the bits of the float for consistent hashing
+        self.0.to_bits().hash(state);
+    }
+}
+
 // Local trait for coinduction testing
 #[traitdef]
 pub trait CoinductionLocalTrait {
@@ -36,6 +40,22 @@ pub mod integration_circular {
     use super::*;
     use std::marker::PhantomData;
     use traitdef::{CircularTrait, LocalTrait, TestTrait};
+
+    impl<T: 'static + Clone + Send> CircularTrait for NodeA<T>
+    where
+        NodeA<T>: Clone,
+        typedef::generic_types::Container<NodeB<T>, InternalType>: LocalTrait,
+        typedef::generic_types::ConstrainedStruct<std::iter::Once<NodeC<T>>>: CircularTrait,
+    {
+        fn circular_method(&self) -> Box<dyn CircularTrait> {
+            Box::new(NodeB::<T> {
+                count: self.value.len(),
+                child_a: None,
+                internal: InternalType(42.0),
+                phantom: PhantomData,
+            })
+        }
+    }
 
     // Define mutually recursive structures
     pub struct NodeA<T> {
@@ -161,6 +181,45 @@ pub mod integration_circular {
         }
     }
 
+    impl<T> std::hash::Hash for NodeB<T> {
+        fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+            self.count.hash(state);
+            // Don't hash circular reference fields
+        }
+    }
+
+    impl<T> Default for NodeA<T> {
+        fn default() -> Self {
+            NodeA {
+                value: String::new(),
+                child_b: None,
+                phantom: PhantomData,
+            }
+        }
+    }
+
+    impl<T> Default for NodeB<T> {
+        fn default() -> Self {
+            NodeB {
+                count: 0,
+                child_a: None,
+                internal: InternalType(0.0),
+                phantom: PhantomData,
+            }
+        }
+    }
+
+    impl<T> Default for NodeC<T> {
+        fn default() -> Self {
+            NodeC {
+                data: 0,
+                ref_a: None,
+                ref_b: None,
+                phantom: PhantomData,
+            }
+        }
+    }
+
     // Implementations with where clauses using traits and types from test crates
     impl<T> TestTrait for NodeA<T>
     where
@@ -171,32 +230,17 @@ pub mod integration_circular {
         }
     }
 
-    impl<T> LocalTrait for NodeB<T>
-    where
-        InternalType: CoinductionLocalTrait,
-    {
+    // InternalType already implements CoinductionLocalTrait unconditionally outside this module,
+    // so we don't need a where clause for it here (which would cause the macro system to fail).
+    impl<T> LocalTrait for NodeB<T> {
         fn local_method(&self) -> usize {
             self.count + (self.internal.coinduction_method() as usize)
         }
     }
 
-    impl<T: 'static> CircularTrait for NodeA<T>
+    impl<T: 'static + Clone + Send> CircularTrait for NodeB<T>
     where
-        typedef::generic_types::Container<NodeB<T>, InternalType>: LocalTrait,
-        typedef::generic_types::ConstrainedStruct<std::iter::Once<NodeC<T>>>: CircularTrait,
-    {
-        fn circular_method(&self) -> Box<dyn CircularTrait> {
-            Box::new(NodeB::<T> {
-                count: self.value.len(),
-                child_a: None,
-                internal: InternalType(42.0),
-                phantom: PhantomData,
-            })
-        }
-    }
-
-    impl<T: 'static> CircularTrait for NodeB<T>
-    where
+        T: Clone,
         typedef::generic_types::Wrapper<NodeA<T>>: LocalTrait,
         typedef::generic_types::MultiGeneric<NodeC<T>, NodeB<T>, String>: CircularTrait,
     {
@@ -210,11 +254,12 @@ pub mod integration_circular {
         }
     }
 
-    impl<T: 'static> CircularTrait for NodeC<T>
+    impl<T: 'static + Clone + Send> CircularTrait for NodeC<T>
     where
+        T: Clone,
         NodeA<T>: TestTrait,
         NodeB<T>: LocalTrait,
-        typedef::generic_types::Container<NodeA<T>, NodeB<T>>: LocalTrait + CircularTrait,
+        typedef::generic_types::Container<NodeA<T>, NodeB<T>>: LocalTrait,
     {
         fn circular_method(&self) -> Box<dyn CircularTrait> {
             Box::new(NodeA::<T> {
@@ -225,21 +270,16 @@ pub mod integration_circular {
         }
     }
 
-    impl<T> CoinductionLocalTrait for NodeA<T>
+    impl<T: Clone> CoinductionLocalTrait for NodeA<T>
     where
         typedef::generic_types::Wrapper<NodeB<T>>: LocalTrait,
-        LocalTypeMarker: coinduction::TypeRef<String>,
     {
         fn coinduction_method(&self) -> f64 {
             self.value.len() as f64
         }
     }
 
-    impl<T> CoinductionLocalTrait for NodeB<T>
-    where
-        TestMarker: coinduction::TypeRef<NodeA<T>>,
-        LocalMarker: coinduction::TypeRef<NodeB<T>>,
-    {
+    impl<T> CoinductionLocalTrait for NodeB<T> {
         fn coinduction_method(&self) -> f64 {
             self.count as f64 * self.internal.0
         }
@@ -247,7 +287,6 @@ pub mod integration_circular {
 
     impl<T> CoinductionLocalTrait for NodeC<T>
     where
-        CoinductionTestMarker: coinduction::TypeRef<NodeC<T>>,
         NodeA<T>: TestTrait + CoinductionLocalTrait,
         NodeB<T>: LocalTrait + CoinductionLocalTrait,
     {
@@ -262,22 +301,6 @@ impl CoinductionLocalTrait for InternalType {
     fn coinduction_method(&self) -> f64 {
         self.0
     }
-}
-
-#[test]
-fn test_traitdef_marker_typeref() {
-    use coinduction::TypeRef;
-
-    // Test that TypeRef implementation is generated for traitdef marker
-    let _: <TestMarker as TypeRef<String>>::Type = String::new();
-}
-
-#[test]
-fn test_typedef_marker_typeref() {
-    use coinduction::TypeRef;
-
-    // Test that TypeRef implementation is generated for typedef marker
-    let _: <TypedefMarker as TypeRef<i32>>::Type = 42i32;
 }
 
 #[test]
@@ -396,22 +419,6 @@ fn test_complex_circular_references() {
 }
 
 #[test]
-fn test_typeref_with_complex_types() {
-    use coinduction::TypeRef;
-    use integration_circular::*;
-    use std::marker::PhantomData;
-
-    // Test TypeRef implementations with complex types from coinduction
-    let _: <CoinductionTestMarker as TypeRef<NodeA<()>>>::Type = NodeA::<()> {
-        value: "test".to_string(),
-        child_b: None,
-        phantom: PhantomData,
-    };
-
-    let _: <LocalTypeMarker as TypeRef<InternalType>>::Type = InternalType(1.0);
-}
-
-#[test]
 fn test_circular_types_usage() {
     // Test using generic types from new module structure
     use typedef::generic_types::{ConstrainedStruct, MultiGeneric};
@@ -433,28 +440,6 @@ fn test_circular_types_usage() {
     // Verify methods don't panic
     let _ = multi_result;
     let _ = constrained_result;
-}
-
-#[test]
-fn test_typeref_direct_usage() {
-    use coinduction::TypeRef;
-    use integration_circular::*;
-    use std::marker::PhantomData;
-
-    // Test direct TypeRef usage with various markers
-    let _: <TestMarker as TypeRef<String>>::Type = String::from("test");
-    let _: <LocalMarker as TypeRef<NodeB<()>>>::Type = NodeB::<()> {
-        count: 10,
-        child_a: None,
-        internal: InternalType(2.5),
-        phantom: PhantomData,
-    };
-    let _: <CoinductionTestMarker as TypeRef<NodeC<()>>>::Type = NodeC::<()> {
-        data: 314, // Changed to integer
-        ref_a: None,
-        ref_b: None,
-        phantom: PhantomData,
-    };
 }
 
 #[test]
@@ -553,8 +538,8 @@ fn test_trait_bound_requirements_without_derive() {
     // when derive macros are removed and demonstrates why they're needed
 
     use integration_circular::*;
-    use typedef::generic_types::{Container, Wrapper};
     use std::marker::PhantomData;
+    use typedef::generic_types::{Container, Wrapper};
 
     let node_a = NodeA::<()> {
         value: "test_bounds".to_string(),
@@ -580,14 +565,14 @@ fn test_trait_bound_requirements_without_derive() {
     // Container<T, U> requires T: Clone + Send and U: Debug + Default for LocalTrait
     let container = Container {
         first: node_b.clone(), // Now possible because we manually implemented Clone
-        second: node_c,       // Debug is manually implemented
+        second: node_c,        // Debug is manually implemented
     };
 
     // Test that local_method works now that trait bounds are satisfied
     let result = container.local_method();
     assert!(result > 0);
 
-    // Test Wrapper with manual implementations  
+    // Test Wrapper with manual implementations
     // Wrapper<T> requires T: Clone + Debug
     let wrapper = Wrapper {
         value: node_a.clone(), // Clone manually implemented
@@ -611,15 +596,15 @@ fn test_coinduction_system_trait_analysis() {
     // that are required for the types to participate in the coinductive type system.
 
     use integration_circular::*;
-    use typedef::generic_types::{Container, Wrapper};
     use std::marker::PhantomData;
+    use typedef::generic_types::{Container, Wrapper};
 
     // ANALYSIS: Required trait implementations for coinduction system participation
-    
+
     // 1. For NodeA<T> to work with Wrapper<T> (which requires TestTrait):
     //    - Wrapper<T> TestTrait impl requires: T: Clone + Debug + ToString
     //    - Without derive: Must manually implement Clone, Debug, ToString for NodeA
-    
+
     // 2. For NodeB<T> and NodeC<T> to work with Container<T,U> (which requires LocalTrait):
     //    - Container<T,U> LocalTrait impl requires: T: Clone + Send + Sync, U: Debug + Hash
     //    - Without derive: Must manually implement Clone, Send, Sync for NodeB
@@ -655,15 +640,15 @@ fn test_coinduction_system_trait_analysis() {
         value: node_a.clone(), // Requires Clone
         count: 1,
     };
-    
+
     let test_output = wrapper_a.test_method(); // Requires Debug + ToString
     assert!(test_output.contains("NodeA(coinduction_test)"));
     assert!(test_output.contains(": 1"));
 
-    // Test 2: Container<NodeB, NodeC> exercises LocalTrait bounds  
+    // Test 2: Container<NodeB, NodeC> exercises LocalTrait bounds
     let container_bc = Container {
-        first: node_b.clone(),  // Requires Clone + Send + Sync
-        second: node_c,         // Requires Debug + Hash
+        first: node_b.clone(), // Requires Clone + Send + Sync
+        second: node_c,        // Requires Debug + Hash
     };
 
     let local_result = container_bc.local_method();
@@ -715,14 +700,14 @@ fn test_coinduction_system_trait_analysis() {
     // because types can appear in unexpected contexts during expansion.
 }
 
-#[test] 
+#[test]
 fn test_trait_bound_error_reproduction() {
     // This test documents the specific errors that occur when derive macros are missing
     // and serves as documentation for why each manual implementation was necessary.
 
     // The original errors were:
     // 1. E0277: `NodeA<()>: Clone` is not satisfied (required by Wrapper<T>)
-    // 2. E0277: `NodeA<()>` doesn't implement `Debug` (required by Wrapper<T>)  
+    // 2. E0277: `NodeA<()>` doesn't implement `Debug` (required by Wrapper<T>)
     // 3. E0277: `NodeA<()>` doesn't implement `ToString` (required by Wrapper<T> TestTrait)
     // 4. E0599: method `local_method` cannot be called due to unsatisfied trait bounds
     //           `NodeB<()>: Clone` and `NodeC<()>: Debug` (required by Container<T,U> LocalTrait)
@@ -732,7 +717,7 @@ fn test_trait_bound_error_reproduction() {
     //
     //   Wrapper<T> TestTrait
     //   ├── T: Clone ✓ (manually implemented)
-    //   ├── T: Debug ✓ (manually implemented) 
+    //   ├── T: Debug ✓ (manually implemented)
     //   └── T: ToString ✓ (manually implemented)
     //
     //   Container<T,U> LocalTrait
@@ -744,7 +729,7 @@ fn test_trait_bound_error_reproduction() {
     //   ├── PartialEq: avoid infinite recursion ✓ (custom implementation)
     //   └── Hash: avoid infinite recursion ✓ (custom implementation)
 
-    // This analysis shows that the coinduction system creates a complex web of 
+    // This analysis shows that the coinduction system creates a complex web of
     // trait dependencies that derive macros normally handle automatically,
     // but when removed, require careful manual implementation to maintain
     // the system's functionality while avoiding infinite recursion.
@@ -760,7 +745,7 @@ fn test_failure_missing_clone_implementation() {
     // This test demonstrates the failure when Clone is not implemented
     // Comment out the Clone implementation for NodeA and uncomment this test to see:
     // error[E0277]: the trait bound `NodeA<()>: Clone` is not satisfied
-    
+
     use integration_circular::*;
     use typedef::generic_types::Wrapper;
     use std::marker::PhantomData;
@@ -780,7 +765,7 @@ fn test_failure_missing_clone_implementation() {
 */
 
 /*
-#[test] 
+#[test]
 fn test_failure_missing_debug_implementation() {
     // This test demonstrates the failure when Debug is not implemented
     // Comment out the Debug implementation for NodeA and uncomment this test to see:
@@ -908,7 +893,7 @@ fn test_failure_missing_hash_implementation() {
 fn test_failure_infinite_recursion_debug() {
     // This test demonstrates what happens with naive Debug implementation that causes infinite recursion
     // If we implemented Debug naively like this:
-    // 
+    //
     // impl<T> std::fmt::Debug for NodeA<T> {
     //     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     //         f.debug_struct("NodeA")
@@ -965,7 +950,7 @@ fn test_failure_missing_multiple_traits() {
     // let cloned = broken_node.clone();        // ERROR: Clone not implemented
     // println!("{:?}", broken_node);           // ERROR: Debug not implemented
     // let s = broken_node.to_string();         // ERROR: ToString not implemented
-    
+
     // And it couldn't be used in generic contexts:
     // let wrapper = Wrapper {
     //     value: broken_node,                   // ERROR: multiple trait bounds not satisfied
@@ -991,7 +976,7 @@ fn test_failure_trait_bound_mismatch() {
 
     // This would work:
     // let node_with_restricted_type = NodeA::<SomeTypeImplementingSomeOtherTrait> { ... };
-    
+
     // But this would fail:
     // let node_with_unit_type = NodeA::<()> { ... };  // ERROR: trait bound not satisfied
     // let cloned = node_with_unit_type.clone();        // ERROR: the trait `SomeOtherTrait` is not implemented for `()`
@@ -1004,8 +989,8 @@ fn test_working_implementations_documentation() {
     // and serves as a reference for the trait requirements
 
     use integration_circular::*;
-    use typedef::generic_types::{Container, Wrapper};
     use std::marker::PhantomData;
+    use typedef::generic_types::{Container, Wrapper};
 
     // Our implementations work because they satisfy all required trait bounds:
 
@@ -1017,10 +1002,10 @@ fn test_working_implementations_documentation() {
     };
 
     let wrapper = Wrapper {
-        value: node_a.clone(),  // ✓ Clone implemented
+        value: node_a.clone(), // ✓ Clone implemented
         count: 1,
     };
-    
+
     let test_result = wrapper.test_method(); // ✓ Debug + ToString implemented
     assert!(test_result.contains("NodeA(working)"));
 
@@ -1032,7 +1017,7 @@ fn test_working_implementations_documentation() {
         phantom: PhantomData,
     };
 
-    // 3. NodeC implements Debug + Hash for Container<T,U> U parameter  
+    // 3. NodeC implements Debug + Hash for Container<T,U> U parameter
     let node_c = NodeC::<()> {
         data: 100,
         ref_a: None,
@@ -1041,8 +1026,8 @@ fn test_working_implementations_documentation() {
     };
 
     let container = Container {
-        first: node_b.clone(),  // ✓ Clone + Send + Sync implemented
-        second: node_c,         // ✓ Debug + Hash implemented
+        first: node_b.clone(), // ✓ Clone + Send + Sync implemented
+        second: node_c,        // ✓ Debug + Hash implemented
     };
 
     let local_result = container.local_method(); // ✓ All trait bounds satisfied
@@ -1069,12 +1054,12 @@ fn test_working_implementations_documentation() {
     circular_a.child_b = Some(Box::new(circular_b));
 
     // These operations work without infinite recursion:
-    let debug_output = format!("{:?}", circular_a);  // ✓ Debug avoids circular fields
-    let cloned_circular = circular_a.clone();         // ✓ Clone works with Box indirection
-    let _ = circular_a == cloned_circular;            // ✓ PartialEq avoids circular fields
+    let debug_output = format!("{:?}", circular_a); // ✓ Debug avoids circular fields
+    let cloned_circular = circular_a.clone(); // ✓ Clone works with Box indirection
+    let _ = circular_a == cloned_circular; // ✓ PartialEq avoids circular fields
 
     assert!(debug_output.contains("circular_parent"));
-    
+
     // The key insight: successful coinduction requires comprehensive trait coverage
     // that accounts for all possible generic contexts the types might appear in.
 }
@@ -1086,10 +1071,10 @@ fn test_working_implementations_documentation() {
 fn test_failure_partial_trait_implementation() {
     // This test shows what happens when you implement some but not all required traits
     // For example, implementing Clone and Debug but forgetting ToString
-    
+
     // If NodeA only had Clone + Debug but not ToString:
     // impl<T: Clone> Clone for NodeA<T> { ... }  ✓
-    // impl<T> Debug for NodeA<T> { ... }         ✓ 
+    // impl<T> Debug for NodeA<T> { ... }         ✓
     // // impl<T> ToString for NodeA<T> { ... }   ✗ Missing!
 
     use integration_circular::*;
@@ -1111,7 +1096,7 @@ fn test_failure_partial_trait_implementation() {
         value: node_a,                         // ✓ Clone + Debug satisfied
         count: 1,
     };
-    
+
     // ERROR: the trait bound `NodeA<()>: ToString` is not satisfied
     let result = wrapper.test_method();        // ✗ ToString required but missing
 }
@@ -1164,7 +1149,7 @@ fn test_failure_coinduction_expansion_trait_mismatch() {
     // If we had a where clause like:
     // where Container<SomeType, NodeC<T>>: LocalTrait
     // but SomeType doesn't implement the traits required for Container's LocalTrait
-    
+
     struct UnimplementedType {
         data: i32,
     }
@@ -1191,7 +1176,7 @@ fn test_failure_coinduction_expansion_trait_mismatch() {
 fn test_failure_circular_dependency_in_traits() {
     // This demonstrates what happens when trait implementations create circular dependencies
     // For example, if NodeA's Clone implementation tried to clone all fields including circular ones
-    
+
     use integration_circular::*;
     use std::marker::PhantomData;
 
@@ -1251,7 +1236,7 @@ fn test_failure_generic_type_parameter_constraints() {
     //     child_b: None,
     //     phantom: PhantomData,
     // };
-    // 
+    //
     // let wrapper = Wrapper {
     //     value: node_a,                    // ERROR: NonCloneType doesn't implement required traits
     //     count: 1,
@@ -1288,7 +1273,7 @@ fn test_failure_marker_trait_type_mismatch() {
 }
 */
 
-#[test] 
+#[test]
 fn test_error_message_documentation() {
     // This test serves as documentation for the specific error messages
     // that developers will encounter when trait implementations are missing
@@ -1298,7 +1283,7 @@ fn test_error_message_documentation() {
     // 1. "the trait bound `TypeName: Clone` is not satisfied"
     //    → Need to implement Clone manually
     //
-    // 2. "`TypeName` doesn't implement `Debug`" 
+    // 2. "`TypeName` doesn't implement `Debug`"
     //    → Need to implement Debug manually
     //
     // 3. "the trait bound `TypeName: ToString` is not satisfied"

@@ -1,9 +1,9 @@
-use coinduction::traitdef;
+use coinduction::coinduction;
 use std::fmt::Debug;
 use std::hash::Hash;
 
 // Local trait that exists only in this crate
-#[traitdef(
+#[coinduction(
     ([$T:ty; $N:expr]) => { $T: ::core::clone::Clone + ::core::default::Default },
     ([$T:ty]) => { $T: ::core::cmp::PartialEq + ::core::clone::Clone },
     (($T:ty, $U:ty)) => { $T: ::core::clone::Clone + ::core::marker::Send, $U: ::core::marker::Sync + ::core::default::Default },
@@ -13,7 +13,7 @@ pub trait LocalTrait {
     fn local_method(&self) -> usize;
 }
 
-#[traitdef(
+#[coinduction(
     (($T:ty, $U:ty)) => { $T: ::core::clone::Clone + ::core::marker::Send, $U: ::core::fmt::Debug + ::core::default::Default },
     (($T:ty, $U:ty, $V:ty)) => { $T: ::core::marker::Send + ::core::marker::Sync, $U: ::core::clone::Clone, $V: ::core::fmt::Debug + ::core::hash::Hash }
 )]
@@ -21,7 +21,7 @@ pub trait TestTrait {
     fn test_method(&self) -> String;
 }
 
-#[traitdef(
+#[coinduction(
     ([$T:ty; $N:expr]) => { $T: ::core::clone::Clone + ::core::marker::Send + ::core::marker::Sync },
     (($T:ty, $U:ty)) => { $T: ::core::default::Default + ::core::clone::Clone, $U: ::core::marker::Send + ::core::marker::Sync }
 )]
@@ -29,7 +29,7 @@ pub trait CircularTrait {
     fn circular_method(&self) -> Box<dyn CircularTrait>;
 }
 
-#[traitdef(
+#[coinduction(
     ([$T:ty]) => { $T: ::core::cmp::PartialEq + ::core::clone::Clone },
     (($T:ty, $U:ty, $V:ty)) => { $T: ::core::hash::Hash + ::core::cmp::Eq, $U: ::core::fmt::Debug + ::core::clone::Clone, $V: ::core::marker::Send + ::core::marker::Sync }
 )]

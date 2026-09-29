@@ -1,19 +1,21 @@
-/// Attribute macro for marking trait definitions that will support coinduction.
+/// Attribute macro for breaking circular trait dependencies.
 ///
-/// This is currently an empty attribute macro that serves as a placeholder for future
-/// implementation of coinductive trait definition functionality.
-pub use coinduction_macro::traitdef;
-
-/// Attribute macro for marking type definitions involved in circular references.
+/// - On a `mod`, it rewrites the impls of the module so that mutually recursive `where` bounds
+///   resolve, and exports the predicates of the impls on local types so that other
+///   `#[coinduction]` modules can see through bounds on them. The traits to work on are marked
+///   inside the module with `#[coinduction] use path::{TraitA, TraitB};` or
+///   `#[coinduction] trait TraitC { ... }`; if none are marked, every trait implemented in the
+///   module is used. Accepted arguments are `marker = <path>` (a type used to refer to relative
+///   paths in exported impls) and `coinduction = <path>` (the path to this crate).
+/// - On a `trait`, it makes the trait usable from `#[coinduction]` modules. Arguments of the form
+///   `(<pattern>) => { <predicates> }` give the predicates of impls of the trait for types
+///   matching `<pattern>`, and `macro_name = <ident>` renames the macro generated for the trait
+///   (by default, the trait name).
+/// - On a `struct`, `enum` or `union` in a `#[coinduction]` module, `macro_name = <ident>` renames
+///   the macro generated for the type (by default, the type name).
 ///
-/// This is currently an empty attribute macro that serves as a placeholder for future
-/// implementation of circular type reference functionality.
-pub use coinduction_macro::typedef;
-
-/// Attribute macro for enabling coinductive reasoning on specific items.
-///
-/// This is currently an empty attribute macro that serves as a placeholder for future
-/// implementation of coinductive reasoning functionality.
+/// `#[coinduction]` modules look up these macros by the trait or type name, so a renamed macro
+/// must be imported under that name where the trait or type is used.
 pub use coinduction_macro::coinduction;
 
 #[doc(hidden)]

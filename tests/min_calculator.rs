@@ -1,12 +1,13 @@
 use coinduction::*;
 
-#[traitdef]
+#[coinduction]
 trait Evaluate {
     fn evaluate(&self, input: &[&'static str], index: &mut usize) -> i32;
 }
 
-#[coinduction(Evaluate)]
+#[coinduction]
 mod calculator {
+    #[coinduction]
     use super::Evaluate;
 
     pub struct Expr;

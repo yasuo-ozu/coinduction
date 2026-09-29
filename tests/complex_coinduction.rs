@@ -7,41 +7,43 @@ pub struct ValidationMarker;
 pub struct ComplexMarker;
 
 // Define multiple traits for complex coinduction testing
-#[traitdef]
+#[coinduction]
 trait Compute<T> {
     type Output;
     fn compute(&self, input: T) -> Self::Output;
 }
 
-#[traitdef]
+#[coinduction]
 trait Process {
     fn process(&self);
 }
 
-#[traitdef]
+#[coinduction]
 trait Validate<T> {
     fn validate(&self, data: T) -> bool;
 }
 
-#[traitdef]
+#[coinduction]
 trait Transform<From, To> {
     fn transform(&self, from: From) -> To;
 }
 
-#[traitdef]
+#[coinduction]
 trait Cache<K, V> {
     fn get(&self, key: K) -> Option<V>;
     fn put(&self, key: K, value: V);
 }
 
-#[traitdef]
+#[coinduction]
 trait Serialize<T> {
     fn serialize(&self, data: T) -> Vec<u8>;
 }
 
 // Define typedef modules that create types implementing our traits
-#[typedef(super::Compute, super::Process, marker = super::ComputeMarker)]
+#[coinduction(marker = super::ComputeMarker)]
 mod compute_types {
+    #[coinduction]
+    use super::{Compute, Process};
     pub struct FastProcessor<T>(pub T);
     pub struct SlowProcessor<T>(pub T);
 
@@ -68,8 +70,10 @@ mod compute_types {
     }
 }
 
-#[typedef(super::Cache, super::Serialize, marker = super::StorageMarker)]
+#[coinduction(marker = super::StorageMarker)]
 mod storage_types {
+    #[coinduction]
+    use super::{Cache, Serialize};
     use std::collections::HashMap;
 
     pub struct MemoryCache<K, V> {
@@ -112,8 +116,10 @@ mod storage_types {
     }
 }
 
-#[typedef(super::Validate, super::Transform, marker = super::ValidationMarker)]
+#[coinduction(marker = super::ValidationMarker)]
 mod validation_types {
+    #[coinduction]
+    use super::{Transform, Validate};
     pub struct EmailValidator;
     pub struct NumberValidator<T>(pub T);
     pub struct DataTransformer<T>(pub T);
@@ -150,17 +156,12 @@ mod validation_types {
 
 /*
 // Complex coinduction module with multiple traits and additional constraints
-// Now using types from #[typedef] modules in where clauses
-#[coinduction(
-    super::Compute,
-    super::Process,
-    super::Validate,
-    super::Transform,
-    super::Cache,
-    super::Serialize
-)]
+// Now using types from other #[coinduction] modules in where clauses
+#[coinduction]
 mod complex_coinduction {
     use std::fmt::Debug;
+    #[coinduction]
+    use super::{Cache, Compute, Process, Serialize, Transform, Validate};
 
     pub struct ProcessorA<T>(pub T);
     pub struct ProcessorB<T>(pub T);
@@ -295,7 +296,7 @@ mod complex_coinduction {
 
 #[test]
 fn test_trait_macro_generation() {
-    // This test verifies that #[traitdef] generates macro_rules! for all traits:
+    // This test verifies that #[coinduction] on traits generates macro_rules! for all traits:
     // - Compute, Process, Validate, Transform
     // The "unused macro definition" warnings confirm this works
 }

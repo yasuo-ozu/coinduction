@@ -5,11 +5,14 @@ use template_quote::quote;
 
 pub struct TraitDefArgs {
     pub rules: Vec<(TokenStream, TokenStream)>,
+    /// The name the generated macro is exported as; defaults to the trait name
+    pub macro_name: Option<Ident>,
 }
 
 impl Parse for TraitDefArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut rules = Vec::new();
+        let mut macro_name = None;
 
         while !input.is_empty() {
             if input.peek(Token![,]) {
@@ -17,6 +20,16 @@ impl Parse for TraitDefArgs {
                 if input.is_empty() {
                     break;
                 }
+            }
+
+            if input.peek(crate::kw::macro_name) && input.peek2(Token![=]) {
+                let kw = input.parse::<crate::kw::macro_name>()?;
+                input.parse::<Token![=]>()?;
+                if macro_name.is_some() {
+                    return Err(syn::Error::new(kw.span, "duplicate `macro_name` argument"));
+                }
+                macro_name = Some(input.parse()?);
+                continue;
             }
 
             // Check if we have a pattern rule starting with (
@@ -39,7 +52,7 @@ impl Parse for TraitDefArgs {
             rules.push((pattern, constraints));
         }
 
-        Ok(TraitDefArgs { rules })
+        Ok(TraitDefArgs { rules, macro_name })
     }
 }
 
@@ -140,6 +153,6 @@ pub fn traitdef(item: ItemTrait, args: TraitDefArgs) -> TokenStream {
 
         #[doc(hidden)]
         #[allow(unused_imports, unused_macros, dead_code)]
-        #{&item.vis} use #temporal_mac_name as #{&item.ident};
+        #{&item.vis} use #temporal_mac_name as #{args.macro_name.as_ref().unwrap_or(&item.ident)};
     }
 }

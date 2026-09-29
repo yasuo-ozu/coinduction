@@ -30,15 +30,18 @@ impl std::hash::Hash for InternalType {
 }
 
 // Local trait for coinduction testing
-#[traitdef]
+#[coinduction]
 pub trait CoinductionLocalTrait {
     fn coinduction_method(&self) -> f64;
 }
 
-#[coinduction(TestTrait, LocalTrait, CircularTrait, CoinductionLocalTrait)]
+#[coinduction]
 pub mod integration_circular {
+    #[coinduction]
+    use super::CoinductionLocalTrait;
     use super::*;
     use std::marker::PhantomData;
+    #[coinduction]
     use traitdef::{CircularTrait, LocalTrait, TestTrait};
 
     impl<T: 'static + Clone + Send> CircularTrait for NodeA<T>

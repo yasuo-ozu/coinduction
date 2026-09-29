@@ -1,9 +1,6 @@
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::TokenStream;
 use proc_macro_error::*;
 use std::collections::{HashMap, HashSet};
-use syn::parse::{Parse, ParseStream};
-use syn::punctuated::Punctuated;
-use syn::spanned::Spanned;
 use syn::*;
 use template_quote::quote;
 use type_leak::{Leaker, NotInternableError};
@@ -131,79 +128,24 @@ fn randomize_generic_params(
     rename_map
 }
 
-mod kw {
-    syn::custom_keyword!(marker);
-    syn::custom_keyword!(coinduction);
-}
-
-pub struct TypeDefArgs {
-    pub(crate) paths: Punctuated<NoArgPath, Token![,]>,
-    #[allow(dead_code)]
-    pub(crate) coinduction: NoArgPath,
-    #[allow(dead_code)]
-    pub marker: Option<syn::Path>,
-}
-
-impl Parse for TypeDefArgs {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let coinduction = crate::try_parse_coinduction_args(input)?;
-        let mut marker = None;
-        let mut paths = Punctuated::new();
-
-        while !input.is_empty() {
-            // Check for marker = ...
-            if input.peek(kw::marker) && input.peek2(Token![=]) {
-                input.parse::<kw::marker>()?;
-                input.parse::<Token![=]>()?;
-                marker = Some(input.parse()?);
-
-                if input.peek(Token![,]) {
-                    input.parse::<Token![,]>()?;
-                }
-                continue;
-            }
-
-            // Parse path
-            let path: NoArgPath = input.parse()?;
-            paths.push(path);
-
-            if input.peek(Token![,]) {
-                input.parse::<Token![,]>()?;
-            } else {
-                break;
-            }
-        }
-
-        Ok(TypeDefArgs {
-            paths,
-            coinduction,
-            marker,
-        })
-    }
-}
-
-pub fn typedef(module: ItemMod, args: TypeDefArgs) -> TokenStream {
+/// Generate, for each local type implementing one of `working_traits`, a hidden macro named after
+/// the type that exposes the predicates of its impls, so that `#[coinduction]` modules elsewhere
+/// can see through bounds on the type.
+///
+/// Impls mentioning relative paths need `marker` to be exported. When it is not given, types with
+/// such impls are not exported.
+///
+/// The macro is exported as the name given in `macro_names`, or as the type name otherwise.
+pub(crate) fn type_macros(
+    content: &[Item],
+    working_traits: &HashSet<NoArgPath>,
+    macro_names: &HashMap<Ident, Ident>,
+    marker: Option<&Path>,
+    coinduction: &NoArgPath,
+) -> TokenStream {
     let random_suffix = crate::get_random();
     let crate_version = env!("CARGO_PKG_VERSION");
-    let content = module
-        .content
-        .as_ref()
-        .map(|c| &c.1)
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
-    let working_traits: HashSet<_> = if args.paths.len() > 0 {
-        args.paths.into_iter().collect()
-    } else {
-        content
-            .iter()
-            .filter_map(|item| match item {
-                Item::Impl(item_impl) => Some(item_impl),
-                _ => None,
-            })
-            .filter_map(|ItemImpl { trait_, .. }| trait_.as_ref().map(|t| remove_path_args(&t.1)))
-            .collect()
-    };
+    let mut unexported_types = HashSet::new();
     let type_idents = content
         .iter()
         .filter_map(|item| match item {
@@ -281,16 +223,13 @@ pub fn typedef(module: ItemMod, args: TypeDefArgs) -> TokenStream {
                         });
 
                         if !referrer.is_empty() {
-                            let marker = args.marker.as_ref().unwrap_or_else(|| {
-                                let first = referrer.iter().next().unwrap();
-                                abort!(
-                                    Span::call_site(), "specify 'marker = ' argument";
-                                    hint = first.span() => "or make this path absolute";
-                                );
-                            });
+                            let Some(marker) = marker else {
+                                unexported_types.insert(type_ident);
+                                return (typeref_impl, acc);
+                            };
                             let mut visitor = referrer.clone().into_visitor(|_ty, ix| {
                                 parse2(quote!(
-                                        <#marker as #{&args.coinduction}::TypeRef<#random_suffix, #ix0, #ix, #typeref_arg>>::Type
+                                        <#marker as #coinduction::TypeRef<#random_suffix, #ix0, #ix, #typeref_arg>>::Type
                                 )).unwrap()
                             });
                             use syn::visit_mut::VisitMut;
@@ -300,7 +239,7 @@ pub fn typedef(module: ItemMod, args: TypeDefArgs) -> TokenStream {
                                 #typeref_impl
                                 #(for (ix, ty) in referrer.iter().enumerate()) {
                                     impl #{renamed_generics.split_for_impl().0}
-                                    #{&args.coinduction}::TypeRef<#random_suffix, #ix0, #ix, #typeref_arg> for #marker {
+                                    #coinduction::TypeRef<#random_suffix, #ix0, #ix, #typeref_arg> for #marker {
                                         type Type = #ty;
                                     }
                                 }
@@ -323,8 +262,24 @@ pub fn typedef(module: ItemMod, args: TypeDefArgs) -> TokenStream {
             (quote!(#typeref_impl), acc)
         },
     );
-    let macros = type_impl_table
+    for (ty_ident, macro_name) in macro_names {
+        if unexported_types.contains(ty_ident) {
+            abort!(
+                macro_name,
+                "no macro is generated for `{}`: its impls use relative paths", ty_ident;
+                help = "specify `marker = <path>` on the module, or use absolute paths"
+            );
+        } else if !type_impl_table.contains_key(ty_ident) {
+            abort!(
+                macro_name,
+                "no macro is generated for `{}`: it does not implement any trait coinduction works on",
+                ty_ident
+            );
+        }
+    }
+    type_impl_table
         .iter()
+        .filter(|(ty_ident, _)| !unexported_types.contains(*ty_ident))
         .fold(TokenStream::new(), |acc, (ty_ident, impls)| {
             let temporal_mac_name = syn::Ident::new(
                 &format!("__{}_temporal_{}", &ty_ident, random_suffix),
@@ -360,16 +315,7 @@ pub fn typedef(module: ItemMod, args: TypeDefArgs) -> TokenStream {
 
                 #[doc(hidden)]
                 #[allow(unused_imports, unused_macros, dead_code)]
-                #vis use #temporal_mac_name as #ty_ident;
+                #vis use #temporal_mac_name as #{macro_names.get(ty_ident).unwrap_or(ty_ident)};
             }
-        });
-    quote! {
-        #(for attr in &module.attrs) { #attr }
-        #{&module.vis} #{&module.unsafety} #{&module.mod_token} #{&module.ident} {
-            #(for item in &content) {
-                #item
-            }
-            #macros
-        }
-    }
+        })
 }

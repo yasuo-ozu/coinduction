@@ -1,12 +1,13 @@
-use coinduction::typedef;
+use coinduction::coinduction;
 use traitdef::{CircularTrait, ExtendedTrait, LocalTrait, TestTrait};
 
 pub struct TypedefMarker;
 pub struct LocalTypeMarker;
 
-#[typedef(TestTrait, LocalTrait, CircularTrait, ExtendedTrait, marker = TypedefMarker)]
+#[coinduction(marker = TypedefMarker)]
 pub mod generic_types {
-    use super::*;
+    #[coinduction]
+    use super::{CircularTrait, ExtendedTrait, LocalTrait, TestTrait};
     use std::fmt::Debug;
     use std::hash::Hash;
 
@@ -133,9 +134,10 @@ pub mod generic_types {
     }
 }
 
-#[typedef(LocalTrait, marker = LocalTypeMarker)]
+#[coinduction(marker = LocalTypeMarker)]
 pub mod local_types {
-    use super::*;
+    #[coinduction]
+    use super::LocalTrait;
 
     pub struct LocalType(pub String);
 

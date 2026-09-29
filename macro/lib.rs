@@ -37,32 +37,6 @@ fn remove_path_args(path: &Path) -> NoArgPath {
     NoArgPath(new_path)
 }
 
-/// Try to parse `coinduction = <path>` as the first argument
-/// Returns coinduction path, defaults to `::coinduction`
-fn try_parse_coinduction_args(input: ParseStream) -> syn::Result<NoArgPath> {
-    if input.peek(Ident) && input.peek2(Token![=]) {
-        let ident: Ident = input.parse()?;
-        if ident == "coinduction" {
-            input.parse::<Token![=]>()?;
-            let path: NoArgPath = input.parse()?;
-
-            // Parse optional comma after coinduction = <path>
-            // If there's no comma and input is not empty, it's an error
-            if input.peek(Token![,]) {
-                input.parse::<Token![,]>()?;
-            } else if !input.is_empty() {
-                return Err(input.error("Expected comma after coinduction argument"));
-            }
-
-            return Ok(path);
-        } else {
-            abort!(&ident, "Bad argument: {}", &ident);
-        }
-    }
-    let default_path: Path = syn::parse_str("::coinduction").unwrap();
-    Ok(NoArgPath(default_path))
-}
-
 fn get_random() -> u64 {
     use core::hash::{BuildHasher, Hasher};
     std::collections::hash_map::RandomState::new()
@@ -80,6 +54,10 @@ fn unwrap_type_group(typ: Type) -> Type {
     }
 }
 
+mod kw {
+    syn::custom_keyword!(macro_name);
+}
+
 mod coinduction;
 mod matching;
 mod next_step;
@@ -89,26 +67,21 @@ mod typedef;
 
 #[proc_macro_error]
 #[proc_macro_attribute]
-pub fn traitdef(attr: TokenStream, input: TokenStream) -> TokenStream {
-    let item = parse_macro_input!(input as ItemTrait);
-    let args = parse_macro_input!(attr as traitdef::TraitDefArgs);
-    traitdef::traitdef(item, args).into()
-}
-
-#[proc_macro_error]
-#[proc_macro_attribute]
-pub fn typedef(attr: TokenStream, input: TokenStream) -> TokenStream {
-    let item = parse_macro_input!(input as ItemMod);
-    let args = parse_macro_input!(attr as typedef::TypeDefArgs);
-    typedef::typedef(item, args).into()
-}
-
-#[proc_macro_error]
-#[proc_macro_attribute]
 pub fn coinduction(attr: TokenStream, input: TokenStream) -> TokenStream {
-    let item = parse_macro_input!(input as ItemMod);
-    let args = parse_macro_input!(attr as coinduction::CoinductionArgs);
-    coinduction::coinduction(item, args).into()
+    match parse_macro_input!(input as Item) {
+        Item::Mod(item) => {
+            let args = parse_macro_input!(attr as coinduction::ModuleArgs);
+            coinduction::coinduction(item, args).into()
+        }
+        Item::Trait(item) => {
+            let args = parse_macro_input!(attr as traitdef::TraitDefArgs);
+            traitdef::traitdef(item, args).into()
+        }
+        item => abort!(
+            item,
+            "`#[coinduction]` can only be applied to a `mod` or a `trait`"
+        ),
+    }
 }
 
 #[proc_macro]

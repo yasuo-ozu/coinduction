@@ -3,7 +3,7 @@
 use coinduction::*;
 use std::fmt::{Display, UpperHex};
 
-#[traitdef((($t1: ty, $t2: ty)) => {$t1: TraitA<S>, $t2: TraitB<S>, S: Display + Default})]
+#[coinduction((($t1: ty, $t2: ty)) => {$t1: TraitA<S>, $t2: TraitB<S>, S: Display + Default})]
 trait TraitA<S> {
     fn get_a(&self) -> String;
 }
@@ -24,7 +24,7 @@ where
     }
 }
 
-#[traitdef((($t1: ty, $t2: ty)) => {$t1: TraitB<S>, $t2: TraitA<S>, S: Display + Default})]
+#[coinduction((($t1: ty, $t2: ty)) => {$t1: TraitB<S>, $t2: TraitA<S>, S: Display + Default})]
 trait TraitB<S> {
     fn get_b(&self) -> String;
 }
@@ -45,9 +45,11 @@ where
     }
 }
 
-#[typedef(TraitA, TraitB)]
+#[coinduction]
 mod typedef_mod {
     use super::*;
+    #[coinduction]
+    use super::{TraitA, TraitB};
 
     pub struct TypeA<U>(U);
 
@@ -117,10 +119,12 @@ mod typedef_mod {
 
 use typedef_mod::*;
 
-#[coinduction(TraitA, TraitB)]
+#[coinduction]
 mod coinduction_mod {
 
     use super::*;
+    #[coinduction]
+    use super::{TraitA, TraitB};
 
     pub struct RecA<T>(pub Option<RecB<T>>, pub core::marker::PhantomData<T>);
 
@@ -161,9 +165,11 @@ mod coinduction_mod {
 
 use coinduction_mod::*;
 
-#[coinduction(TraitA, TraitB)]
+#[coinduction]
 mod complex_recursive {
     use super::*;
+    #[coinduction]
+    use super::{TraitA, TraitB};
 
     struct RecC<T1, T2, T3, T4>((T1, Wrapper2<(T2, (T3, (T3, RecD<T1, T2, T3, T4>))), T4>));
 

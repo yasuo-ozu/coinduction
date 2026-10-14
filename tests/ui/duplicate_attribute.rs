@@ -1,6 +1,6 @@
 use coinduction::coinduction;
 
-#[coinduction]
+#[announce::announce]
 pub trait Count {
     fn count(&self) -> usize;
 }

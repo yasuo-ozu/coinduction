@@ -1,7 +1,7 @@
-// Exporting a type whose impls use relative paths needs `marker`.
+// Announcing a type whose impls use relative paths needs `marker`.
 use coinduction::coinduction;
 
-#[coinduction]
+#[announce::announce]
 pub trait Conv<T> {
     fn conv(&self);
 }
@@ -14,7 +14,7 @@ mod m {
     use super::Conv;
     use super::Local;
 
-    #[coinduction(macro_name = SMacro)]
+    #[announce::announce]
     pub struct S;
 
     impl Conv<Local> for S {

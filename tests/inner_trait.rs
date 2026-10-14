@@ -2,7 +2,7 @@ use coinduction::coinduction;
 
 #[coinduction]
 mod calculator {
-    #[coinduction]
+    #[announce::announce]
     pub trait Evaluate {
         fn evaluate(&self, input: &[&'static str], index: &mut usize) -> i32;
     }

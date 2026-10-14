@@ -1,5 +1,0 @@
-error: no macro is generated for `S`: it does not implement any trait coinduction works on
-  --> tests/ui/macro_name_without_impls.rs:14:32
-   |
-14 |     #[coinduction(macro_name = SMacro)]
-   |                                ^^^^^^

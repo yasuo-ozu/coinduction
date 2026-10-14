@@ -1,12 +1,12 @@
 use proc_macro2::TokenStream;
 use proc_macro_error::abort;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::*;
 use template_quote::quote;
 
-use crate::next_step::{next_step, NextStepArgs, NextStepKind};
+use crate::next_step::{next_step, NextStepArgs};
 use crate::solver::{Constraint, Solver};
 use crate::{remove_path_args, NoArgPath};
 
@@ -30,37 +30,54 @@ fn take_coinduction_attr(attrs: &mut Vec<Attribute>) -> Option<Attribute> {
     Some(attr)
 }
 
-/// Parse the arguments of an inner `#[coinduction]` / `#[coinduction(...)]` attribute.
-fn parse_attr_args<T: Parse>(attr: &Attribute) -> T {
-    match &attr.meta {
-        Meta::Path(_) => parse2(TokenStream::new()),
-        Meta::List(_) => attr.parse_args(),
-        Meta::NameValue(_) => abort!(attr, "expected `#[coinduction]` or `#[coinduction(...)]`"),
-    }
-    .unwrap_or_else(|e| abort!(e.span(), "{}", e))
+/// Whether `attr` is `#[announce]` / `#[announce(...)]` (also with a path, as
+/// `#[announce::announce]`): the attribute, or the helper attribute of `#[derive(Announce)]`.
+fn is_announce_attr(attr: &Attribute) -> bool {
+    attr.path()
+        .segments
+        .last()
+        .map_or(false, |seg| seg.ident == "announce")
 }
 
-/// Arguments of `#[coinduction(...)]` on a struct, enum or union in a module: `macro_name = <ident>`.
-struct TypeArgs {
-    macro_name: Option<Ident>,
+/// Whether the item is announced: it has `#[announce]`, or derives `Announce`.
+fn is_announced(attrs: &[Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        is_announce_attr(attr)
+            || (attr.path().is_ident("derive")
+                && attr
+                    .parse_args_with(Punctuated::<Path, Token![,]>::parse_terminated)
+                    .map_or(false, |paths| {
+                        paths.iter().any(|path| {
+                            path.segments
+                                .last()
+                                .map_or(false, |seg| seg.ident == "Announce")
+                        })
+                    }))
+    })
 }
 
-impl Parse for TypeArgs {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let mut macro_name = None;
-        if !input.is_empty() {
-            input.parse::<crate::kw::macro_name>()?;
-            input.parse::<Token![=]>()?;
-            macro_name = Some(input.parse()?);
-            if !input.is_empty() {
-                input.parse::<Token![,]>()?;
+/// Add `meta = <meta>` to the options of the announcement of an item: to its `#[announce(...)]`
+/// attribute, or, for `#[derive(Announce)]` without one, in a new helper attribute.
+fn add_announce_meta(attrs: &mut Vec<Attribute>, meta: &TokenStream) {
+    let Some(attr) = attrs.iter_mut().find(|attr| is_announce_attr(attr)) else {
+        attrs.push(parse_quote!(#[announce(meta = #meta)]));
+        return;
+    };
+    let path = attr.path().clone();
+    let options = match &attr.meta {
+        Meta::Path(_) => TokenStream::new(),
+        Meta::List(list) => {
+            let mut options = list.tokens.clone();
+            if !options.is_empty()
+                && !matches!(options.clone().into_iter().last(), Some(proc_macro2::TokenTree::Punct(p)) if p.as_char() == ',')
+            {
+                options.extend(quote!(,));
             }
+            options
         }
-        if !input.is_empty() {
-            return Err(input.error("expected `macro_name = <ident>`"));
-        }
-        Ok(TypeArgs { macro_name })
-    }
+        Meta::NameValue(_) => abort!(attr, "expected `#[announce]` or `#[announce(...)]`"),
+    };
+    attr.meta = parse_quote!(#path(#options meta = #meta));
 }
 
 /// Collect the traits imported by a `#[coinduction] use ...;` item, both by the name they are
@@ -130,7 +147,7 @@ impl Parse for ModuleArgs {
                 coinduction = Some(input.parse()?);
             } else {
                 return Err(input.error(
-                    "expected `marker = <path>` or `coinduction = <path>`; mark traits with `#[coinduction] use ...;` or `#[coinduction] trait ...` inside the module",
+                    "expected `marker = <path>` or `coinduction = <path>`; mark traits with `#[coinduction] use ...;` inside the module, or announce them there with `#[announce] trait ...`",
                 ));
             }
             if !input.is_empty() {
@@ -145,11 +162,11 @@ impl Parse for ModuleArgs {
 }
 
 pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
-    // Traits marked with `#[coinduction] use ...;` or `#[coinduction] trait ...` in the module
+    // Traits marked with `#[coinduction] use ...;` or announced in the module
     let mut marked_traits = HashSet::new();
-    // Custom names for the macros of the types, given by `#[coinduction(macro_name = ...)]`
-    let mut macro_names = HashMap::new();
-    let (target_impls, other_contents): (Vec<ItemImpl>, Vec<TokenStream>) = module
+    // Types announced in the module: their announcements carry the predicates of their impls
+    let mut announced_types = Vec::new();
+    let (target_impls, mut other_contents): (Vec<ItemImpl>, Vec<Item>) = module
         .content
         .as_ref()
         .map(|c| &c.1)
@@ -188,32 +205,51 @@ pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
                         segments: Punctuated::new(),
                     };
                     collect_use_traits(&item_use.tree, &mut prefix, &mut marked_traits);
-                    others.push(quote!(#[allow(unused_imports)] #item_use));
+                    let mut item_use = item_use;
+                    item_use.attrs.push(parse_quote!(#[allow(unused_imports)]));
+                    others.push(Item::Use(item_use));
                 }
-                (Item::Trait(item_trait), Some(attr)) => {
-                    marked_traits.insert(NoArgPath(item_trait.ident.clone().into()));
-                    others.push(crate::traitdef::traitdef(item_trait, parse_attr_args(&attr)));
+                (Item::Trait(item_trait), Some(_)) => abort!(
+                    item_trait.ident,
+                    "`#[coinduction]` is no longer applied to traits";
+                    help = "announce the trait with `#[announce::announce]`; traits announced in a `#[coinduction]` module are worked on"
+                ),
+                (
+                    Item::Struct(ItemStruct { ident, .. })
+                    | Item::Enum(ItemEnum { ident, .. })
+                    | Item::Union(ItemUnion { ident, .. }),
+                    Some(_),
+                ) => abort!(
+                    ident,
+                    "`#[coinduction]` is no longer applied to types";
+                    help = "announce the type with `#[announce::announce]` to make its impls visible to other `#[coinduction]` modules; rename its macro with `#[announce::announce(macro_name = ...)]`"
+                ),
+                (item, Some(_)) => abort!(
+                    item,
+                    "`#[coinduction]` in a `#[coinduction]` module can only be applied to `use` items"
+                ),
+                (Item::Trait(item_trait), None) => {
+                    if is_announced(&item_trait.attrs) {
+                        marked_traits.insert(NoArgPath(item_trait.ident.clone().into()));
+                    }
+                    others.push(Item::Trait(item_trait));
                 }
                 (
                     item @ (Item::Struct(_) | Item::Enum(_) | Item::Union(_)),
-                    Some(attr),
+                    None,
                 ) => {
-                    if let Some(macro_name) = parse_attr_args::<TypeArgs>(&attr).macro_name {
-                        let (Item::Struct(ItemStruct { ident, .. })
-                        | Item::Enum(ItemEnum { ident, .. })
-                        | Item::Union(ItemUnion { ident, .. })) = &item
-                        else {
-                            unreachable!()
-                        };
-                        macro_names.insert(ident.clone(), macro_name);
+                    let (Item::Struct(ItemStruct { attrs, ident, .. })
+                    | Item::Enum(ItemEnum { attrs, ident, .. })
+                    | Item::Union(ItemUnion { attrs, ident, .. })) = &item
+                    else {
+                        unreachable!()
+                    };
+                    if is_announced(attrs) {
+                        announced_types.push(ident.clone());
                     }
-                    others.push(quote!(#item));
+                    others.push(item);
                 }
-                (item, Some(_)) => abort!(
-                    item,
-                    "`#[coinduction]` in a `#[coinduction]` module can only be applied to `use`, `trait`, `struct`, `enum` or `union` items"
-                ),
-                (item, None) => others.push(quote!(#item)),
+                (item, None) => others.push(item),
             }
             (impls, others)
         });
@@ -264,15 +300,24 @@ pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
             Some(solver)
         })
         .collect();
-    let type_macros = crate::typedef::type_macros(
+    let (impls_metas, typeref_impls) = crate::typedef::type_impls(
         module.content.as_ref().map_or(&[][..], |c| &c.1),
         &working_traits,
-        &macro_names,
+        &announced_types,
         args.marker.as_ref(),
         &args.coinduction,
     );
+    for item in other_contents.iter_mut() {
+        if let Item::Struct(ItemStruct { attrs, ident, .. })
+        | Item::Enum(ItemEnum { attrs, ident, .. })
+        | Item::Union(ItemUnion { attrs, ident, .. }) = item
+        {
+            if let Some(meta) = impls_metas.get(ident) {
+                add_announce_meta(attrs, meta);
+            }
+        }
+    }
     let next_step_args = NextStepArgs {
-        kind: NextStepKind::None,
         working_list: working_list.into_iter().collect(),
         coinduction: args.coinduction.clone(),
         working_traits: working_traits.into_iter().collect(),
@@ -289,7 +334,7 @@ pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
         #{ &module.ident } {
             #(for content in other_contents) { #content }
             #next
-            #type_macros
+            #typeref_impls
         }
     }
 }

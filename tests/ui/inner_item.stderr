@@ -1,0 +1,5 @@
+error: `#[coinduction]` in a `#[coinduction]` module can only be applied to `use`, `trait`, `struct`, `enum` or `union` items
+ --> tests/ui/inner_item.rs:7:5
+  |
+7 |     fn f() {}
+  |     ^^^^^^^^^

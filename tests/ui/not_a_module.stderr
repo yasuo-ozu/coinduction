@@ -1,0 +1,5 @@
+error: `#[coinduction]` can only be applied to a `mod` or a `trait`
+ --> tests/ui/not_a_module.rs:4:1
+  |
+4 | fn f() {}
+  | ^^^^^^^^^

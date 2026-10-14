@@ -32,3 +32,7 @@ pub use coinduction_macro::__next_step;
 pub trait TypeRef<const RANDOM: u64, const IX0: usize, const IX: usize, ARG: ?Sized> {
     type Type: ?Sized;
 }
+
+#[cfg(doctest)]
+#[doc = include_str!("README.md")]
+struct ReadmeDoctests;

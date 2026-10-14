@@ -1,38 +1,38 @@
-use coinduction::coinduction;
+use announce::announce;
 use std::fmt::Debug;
 use std::hash::Hash;
 
 // Local trait that exists only in this crate
-#[coinduction(
+#[announce(meta = coinduction::rules(
     ([$T:ty; $N:expr]) => { $T: ::core::clone::Clone + ::core::default::Default },
     ([$T:ty]) => { $T: ::core::cmp::PartialEq + ::core::clone::Clone },
     (($T:ty, $U:ty)) => { $T: ::core::clone::Clone + ::core::marker::Send, $U: ::core::marker::Sync + ::core::default::Default },
     (($T:ty, $U:ty, $V:ty)) => { $T: ::core::clone::Clone + ::core::marker::Send, $U: ::core::marker::Sync, $V: ::core::default::Default + ::core::marker::Send }
-)]
+))]
 pub trait LocalTrait {
     fn local_method(&self) -> usize;
 }
 
-#[coinduction(
+#[announce(meta = coinduction::rules(
     (($T:ty, $U:ty)) => { $T: ::core::clone::Clone + ::core::marker::Send, $U: ::core::fmt::Debug + ::core::default::Default },
     (($T:ty, $U:ty, $V:ty)) => { $T: ::core::marker::Send + ::core::marker::Sync, $U: ::core::clone::Clone, $V: ::core::fmt::Debug + ::core::hash::Hash }
-)]
+))]
 pub trait TestTrait {
-    fn test_method(&self) -> String;
+    fn test_method(&self) -> ::std::string::String;
 }
 
-#[coinduction(
+#[announce(meta = coinduction::rules(
     ([$T:ty; $N:expr]) => { $T: ::core::clone::Clone + ::core::marker::Send + ::core::marker::Sync },
     (($T:ty, $U:ty)) => { $T: ::core::default::Default + ::core::clone::Clone, $U: ::core::marker::Send + ::core::marker::Sync }
-)]
+))]
 pub trait CircularTrait {
-    fn circular_method(&self) -> Box<dyn CircularTrait>;
+    fn circular_method(&self) -> ::std::boxed::Box<dyn crate::CircularTrait>;
 }
 
-#[coinduction(
+#[announce(meta = coinduction::rules(
     ([$T:ty]) => { $T: ::core::cmp::PartialEq + ::core::clone::Clone },
     (($T:ty, $U:ty, $V:ty)) => { $T: ::core::hash::Hash + ::core::cmp::Eq, $U: ::core::fmt::Debug + ::core::clone::Clone, $V: ::core::marker::Send + ::core::marker::Sync }
-)]
+))]
 pub trait ExtendedTrait {
     fn extended_method(&self) -> bool;
 }
@@ -162,5 +162,33 @@ where
         let mut hasher = DefaultHasher::new();
         self.0.hash(&mut hasher);
         hasher.finish() % 2 == 0
+    }
+}
+
+/// A plain trait, named with `crate::` in the rules of `Size`: other crates read it as
+/// `$crate::Countable`.
+pub trait Countable {}
+
+#[announce(meta = coinduction::rules(
+    (u8) => {},
+    (($T:ty, $U:ty)) => { $T: Size + crate::Countable, $U: Size }
+))]
+pub trait Size {
+    fn size(&self) -> usize;
+}
+
+impl Size for u8 {
+    fn size(&self) -> usize {
+        1
+    }
+}
+
+impl<T, U> Size for (T, U)
+where
+    T: Size + Countable,
+    U: Size,
+{
+    fn size(&self) -> usize {
+        self.0.size() + self.1.size()
     }
 }

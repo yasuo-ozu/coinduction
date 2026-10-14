@@ -1,12 +1,12 @@
-//! A chain of 24 constraints dispatched through trait rules must fit in the default
-//! `recursion_limit`.
+//! A chain of 24 constraints dispatched through announce trampolines and trait rules must fit in
+//! the default `recursion_limit` (each step nests about 4 macro expansions).
 
 use coinduction::coinduction;
 
-#[coinduction(
+#[announce::announce(meta = coinduction::rules(
     (($T:ty, $U:ty)) => { $T: Size, $U: Size },
     (u8) => {}
-)]
+))]
 pub trait Size {
     fn size(&self) -> usize;
 }

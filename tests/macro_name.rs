@@ -1,6 +1,7 @@
+use announce::announce;
 use coinduction::coinduction;
 
-#[coinduction(macro_name = CountMacro)]
+#[announce(macro_name = CountMacro)]
 pub trait Count {
     fn count(&self) -> usize;
 }
@@ -10,8 +11,8 @@ pub mod wrappers {
     #[coinduction]
     use super::{Count, CountMacro as Count};
 
-    #[coinduction(macro_name = BoxedMacro)]
-    pub struct Boxed<T>(pub Option<Box<T>>);
+    #[announce::announce(macro_name = BoxedMacro)]
+    pub struct Boxed<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
 
     impl<T> Count for Boxed<T>
     where

@@ -128,34 +128,24 @@ fn randomize_generic_params(
     rename_map
 }
 
-/// Generate, for each local type implementing one of `working_traits`, a hidden macro named after
-/// the type that exposes the predicates of its impls, so that `#[coinduction]` modules elsewhere
-/// can see through bounds on the type.
+/// The `META` that a `#[coinduction]` module adds to the announcement of each type in
+/// `announced`: `::coinduction::impls(<version>, [<predicates>])`, the predicates of the impls of
+/// `working_traits` on the type, so that `#[coinduction]` modules elsewhere can see through bounds
+/// on the type. Also returns the `TypeRef` impls of `marker` that the predicates use.
 ///
-/// Impls mentioning relative paths need `marker` to be exported. When it is not given, types with
-/// such impls are not exported.
-///
-/// The macro is exported as the name given in `macro_names`, or as the type name otherwise.
-pub(crate) fn type_macros(
+/// Impls mentioning relative paths need `marker`: without it, announcing a type with such impls is
+/// an error.
+pub(crate) fn type_impls(
     content: &[Item],
     working_traits: &HashSet<NoArgPath>,
-    macro_names: &HashMap<Ident, Ident>,
+    announced: &[Ident],
     marker: Option<&Path>,
     coinduction: &NoArgPath,
-) -> TokenStream {
+) -> (HashMap<Ident, TokenStream>, TokenStream) {
     let random_suffix = crate::get_random();
     let crate_version = env!("CARGO_PKG_VERSION");
     let mut unexported_types = HashSet::new();
-    let type_idents = content
-        .iter()
-        .filter_map(|item| match item {
-            Item::Enum(ItemEnum { vis, ident, .. })
-            | Item::Struct(ItemStruct { vis, ident, .. })
-            | Item::Union(ItemUnion { vis, ident, .. }) => Some((ident.clone(), vis.clone())),
-            _ => None,
-        })
-        .collect::<HashMap<_, _>>();
-    let (_typeref_impl, type_impl_table) = content.iter().enumerate().fold(
+    let (typeref_impl, type_impl_table) = content.iter().enumerate().fold(
         Default::default(),
         |(mut typeref_impl, mut acc): (TokenStream, HashMap<Ident, Vec<(Generics, Constraint, Vec<Constraint>)>>),
          (ix0, item)| {
@@ -175,6 +165,7 @@ pub(crate) fn type_macros(
                                 segments,
                             },
                     }) if segments.len() == 1
+                        && announced.contains(&segments[0].ident)
                         && working_traits.contains(&remove_path_args(trait_path)) =>
                     {
                         // Extract type identifier before modifications
@@ -238,6 +229,7 @@ pub(crate) fn type_macros(
                             typeref_impl = quote!(
                                 #typeref_impl
                                 #(for (ix, ty) in referrer.iter().enumerate()) {
+                                    #[allow(non_camel_case_types)]
                                     impl #{renamed_generics.split_for_impl().0}
                                     #coinduction::TypeRef<#random_suffix, #ix0, #ix, #typeref_arg> for #marker {
                                         type Type = #ty;
@@ -262,60 +254,33 @@ pub(crate) fn type_macros(
             (quote!(#typeref_impl), acc)
         },
     );
-    for (ty_ident, macro_name) in macro_names {
-        if unexported_types.contains(ty_ident) {
-            abort!(
-                macro_name,
-                "no macro is generated for `{}`: its impls use relative paths", ty_ident;
-                help = "specify `marker = <path>` on the module, or use absolute paths"
-            );
-        } else if !type_impl_table.contains_key(ty_ident) {
-            abort!(
-                macro_name,
-                "no macro is generated for `{}`: it does not implement any trait coinduction works on",
-                ty_ident
-            );
-        }
-    }
-    type_impl_table
+    let metas = announced
         .iter()
-        .filter(|(ty_ident, _)| !unexported_types.contains(*ty_ident))
-        .fold(TokenStream::new(), |acc, (ty_ident, impls)| {
-            let temporal_mac_name = syn::Ident::new(
-                &format!("__{}_temporal_{}", &ty_ident, random_suffix),
-                ty_ident.span(),
-            );
-            let vis = type_idents
-                .get(&ty_ident)
-                .cloned()
-                .unwrap_or(Visibility::Public(Default::default()));
-            quote! {
-                #acc
-
-                #[allow(unused_macros, unused_imports, dead_code, non_local_definitions)]
-                #[doc(hidden)]
-                #[macro_export]
-                macro_rules! #temporal_mac_name {
-                    (#crate_version, None, [$($wt:tt)*], {$($coinduction:tt)+}, $($t:tt)*) => {
-                        $($coinduction)+::__next_step! {
-                            #crate_version, Typedef {
-                                predicates: [
-                                    #(for (generics, constraint, children) in impls), {
-                                        (
-                                            [ #(for p in &generics.params), {#p} ],
-                                            #constraint,
-                                            [ #(for c in children), { #c } ]
-                                        )
-                                    }
-                                ]
-                            }, [$($wt)*], {$($coinduction)+}, $($t)*
-                        }
-                    }
-                }
-
-                #[doc(hidden)]
-                #[allow(unused_imports, unused_macros, dead_code)]
-                #vis use #temporal_mac_name as #{macro_names.get(ty_ident).unwrap_or(ty_ident)};
+        .map(|ty_ident| {
+            if unexported_types.contains(ty_ident) {
+                abort!(
+                    ty_ident,
+                    "the impls of `{}` use relative paths, so they cannot be announced", ty_ident;
+                    help = "specify `marker = <path>` on the module, or use absolute paths"
+                );
             }
+            let impls = type_impl_table.get(ty_ident).map_or(&[][..], |v| &v[..]);
+            let meta = quote! {
+                ::coinduction::impls(
+                    #crate_version,
+                    [
+                        #(for (generics, constraint, children) in impls), {
+                            (
+                                [ #(for p in &generics.params), {#p} ],
+                                #constraint,
+                                [ #(for c in children), { #c } ]
+                            )
+                        }
+                    ]
+                )
+            };
+            (ty_ident.clone(), meta)
         })
+        .collect();
+    (metas, typeref_impl)
 }

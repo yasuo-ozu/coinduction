@@ -1,0 +1,8 @@
+error: `#[coinduction]` is no longer applied to types
+
+         = help: announce the type with `#[announce::announce]` to make its impls visible to other `#[coinduction]` modules; rename its macro with `#[announce::announce(macro_name = ...)]`
+
+  --> tests/ui/type_attribute.rs:15:16
+   |
+15 |     pub struct S;
+   |                ^

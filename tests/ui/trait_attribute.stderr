@@ -1,0 +1,8 @@
+error: `#[coinduction]` is no longer applied to traits
+
+         = help: announce the trait with `#[announce::announce]`, and give its rules with `#[announce::announce(meta = coinduction::rules(...))]`
+
+ --> tests/ui/trait_attribute.rs:5:11
+  |
+5 | pub trait Count {
+  |           ^^^^^

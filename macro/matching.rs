@@ -379,7 +379,8 @@ impl Matching for Path {
         self.segments.iter().zip(&other.segments).try_fold(
             Substitute::new(),
             |result, (l_seg, r_seg)| {
-                (l_seg.ident == r_seg.ident).then_some(())?;
+                (crate::comparison_key(&l_seg.ident) == crate::comparison_key(&r_seg.ident))
+                    .then_some(())?;
                 let new_subs = l_seg.arguments.matches(&r_seg.arguments, params)?;
                 result.combine(new_subs)
             },

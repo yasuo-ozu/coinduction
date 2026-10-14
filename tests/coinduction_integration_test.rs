@@ -30,7 +30,7 @@ impl std::hash::Hash for InternalType {
 }
 
 // Local trait for coinduction testing
-#[coinduction]
+#[announce::announce]
 pub trait CoinductionLocalTrait {
     fn coinduction_method(&self) -> f64;
 }

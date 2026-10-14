@@ -1,15 +1,5 @@
-error: no rules expected `(`
+error: coinduction: no rule of the trait `Count` matches `(u8, u8)`, and the type has no announced definition
   --> tests/ui/no_rule.rs:18:9
    |
- 4 | #[coinduction]
-   | -------------- when calling this macro
-...
 18 |         (u8, u8): Count,
-   |         ^^^^^^^^ no rules expected this token in macro call
-   |
-note: while trying to match `::`
-  --> tests/ui/no_rule.rs:4:1
-   |
- 4 | #[coinduction]
-   | ^^^^^^^^^^^^^^
-   = note: this error originates in the attribute macro `coinduction` (in Nightly builds, run with -Z macro-backtrace for more info)
+   |         ^^^^^^^^

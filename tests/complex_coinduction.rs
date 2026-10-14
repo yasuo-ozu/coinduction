@@ -7,34 +7,34 @@ pub struct ValidationMarker;
 pub struct ComplexMarker;
 
 // Define multiple traits for complex coinduction testing
-#[coinduction]
+#[announce::announce(allow_std_prelude = true)]
 trait Compute<T> {
     type Output;
     fn compute(&self, input: T) -> Self::Output;
 }
 
-#[coinduction]
+#[announce::announce(allow_std_prelude = true)]
 trait Process {
     fn process(&self);
 }
 
-#[coinduction]
+#[announce::announce(allow_std_prelude = true)]
 trait Validate<T> {
     fn validate(&self, data: T) -> bool;
 }
 
-#[coinduction]
+#[announce::announce(allow_std_prelude = true)]
 trait Transform<From, To> {
     fn transform(&self, from: From) -> To;
 }
 
-#[coinduction]
+#[announce::announce(allow_std_prelude = true)]
 trait Cache<K, V> {
     fn get(&self, key: K) -> Option<V>;
     fn put(&self, key: K, value: V);
 }
 
-#[coinduction]
+#[announce::announce(allow_std_prelude = true)]
 trait Serialize<T> {
     fn serialize(&self, data: T) -> Vec<u8>;
 }
@@ -44,7 +44,9 @@ trait Serialize<T> {
 mod compute_types {
     #[coinduction]
     use super::{Compute, Process};
+    #[announce::announce]
     pub struct FastProcessor<T>(pub T);
+    #[announce::announce]
     pub struct SlowProcessor<T>(pub T);
 
     impl<T: Clone> super::Compute<T> for FastProcessor<T> {
@@ -74,15 +76,16 @@ mod compute_types {
 mod storage_types {
     #[coinduction]
     use super::{Cache, Serialize};
-    use std::collections::HashMap;
 
+    #[announce::announce]
     pub struct MemoryCache<K, V> {
-        pub data: HashMap<K, V>,
+        pub data: ::std::collections::HashMap<K, V>,
     }
 
+    #[announce::announce]
     pub struct DiskCache<K, V> {
-        pub path: String,
-        pub _phantom: std::marker::PhantomData<(K, V)>,
+        pub path: ::std::string::String,
+        pub _phantom: ::core::marker::PhantomData<(K, V)>,
     }
 
     impl<K: Clone + Eq + std::hash::Hash, V: Clone> super::Cache<K, V> for MemoryCache<K, V> {
@@ -120,8 +123,11 @@ mod storage_types {
 mod validation_types {
     #[coinduction]
     use super::{Transform, Validate};
+    #[announce::announce]
     pub struct EmailValidator;
+    #[announce::announce]
     pub struct NumberValidator<T>(pub T);
+    #[announce::announce]
     pub struct DataTransformer<T>(pub T);
 
     impl super::Validate<::std::string::String> for EmailValidator {
@@ -296,9 +302,8 @@ mod complex_coinduction {
 
 #[test]
 fn test_trait_macro_generation() {
-    // This test verifies that #[coinduction] on traits generates macro_rules! for all traits:
+    // This test verifies that `#[announce]` generates trampolines for all traits:
     // - Compute, Process, Validate, Transform
-    // The "unused macro definition" warnings confirm this works
 }
 
 /* NOTE: Complex coinduction tests commented out - see note above

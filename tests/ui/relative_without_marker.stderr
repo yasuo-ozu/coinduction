@@ -1,8 +1,8 @@
-error: no macro is generated for `S`: its impls use relative paths
+error: the impls of `S` use relative paths, so they cannot be announced
 
          = help: specify `marker = <path>` on the module, or use absolute paths
 
-  --> tests/ui/relative_without_marker.rs:17:32
+  --> tests/ui/relative_without_marker.rs:18:16
    |
-17 |     #[coinduction(macro_name = SMacro)]
-   |                                ^^^^^^
+18 |     pub struct S;
+   |                ^

@@ -1,0 +1,8 @@
+error: `#[coinduction]` is no longer applied to traits
+
+         = help: announce the trait with `#[announce::announce]`; traits announced in a `#[coinduction]` module are worked on
+
+ --> tests/ui/inner_trait_attribute.rs:7:15
+  |
+7 |     pub trait Count {
+  |               ^^^^^

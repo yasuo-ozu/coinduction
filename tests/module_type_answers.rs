@@ -1,13 +1,13 @@
-//! Cycles that leave the module more than once: the answer for a type of another module, or of the
-//! rules of a trait, is a constraint on another type of the module, which is followed through the
-//! impls of the module.
+//! Cycles that leave the module more than once: the answer for a type announced by another module,
+//! or of the rules of a trait, is a constraint on another type of the module, which is followed
+//! through the impls of the module.
 
 use coinduction::coinduction;
 
-#[coinduction(
+#[announce::announce(meta = coinduction::rules(
     (u8) => {},
     (($T:ty, $U:ty)) => { $T: Count, $U: Count }
-)]
+))]
 pub trait Count {
     fn count(&self) -> usize;
 }
@@ -29,7 +29,8 @@ pub mod defs {
     #[coinduction]
     use super::Count;
 
-    pub struct Wrap<T>(pub Option<Box<T>>);
+    #[announce::announce]
+    pub struct Wrap<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
 
     impl<T> Count for Wrap<T>
     where
@@ -161,7 +162,10 @@ fn test_through_type_generic() {
 
 #[test]
 fn test_through_rules() {
-    let a = RulesA(Some(Box::new((1, RulesB(Some(Box::new((1, RulesA(None)))))))));
+    let a = RulesA(Some(Box::new((
+        1,
+        RulesB(Some(Box::new((1, RulesA(None))))),
+    ))));
     assert_eq!(a.count(), 2);
 }
 

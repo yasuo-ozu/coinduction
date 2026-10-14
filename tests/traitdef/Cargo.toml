@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-coinduction = { path = "../.." }
+announce = "0.1.1"
 
 [lib]
 path = "lib.rs"

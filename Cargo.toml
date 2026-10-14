@@ -14,6 +14,7 @@ authors = ["yasuo-ozu"]
 coinduction-macro = { path = "./macro", version = "0.2.0" }
 
 [dev-dependencies]
+announce = "0.1.1"
 rustversion = "1.0"
 trybuild = "1.0"
 traitdef = { path = "tests/traitdef" }

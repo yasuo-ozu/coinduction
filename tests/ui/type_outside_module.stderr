@@ -1,0 +1,8 @@
+error: coinduction: `super::Outside` is announced, but not in a `#[coinduction]` module, so its impls are unknown
+
+         = help: move the type into a `#[coinduction]` module, or give the trait a rule for it with `#[announce(meta = coinduction::rules(...))]`
+
+  --> tests/ui/type_outside_module.rs:21:9
+   |
+21 |         super::Outside: Count,
+   |         ^^^^^^^^^^^^^^

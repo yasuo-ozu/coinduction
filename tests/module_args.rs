@@ -4,7 +4,7 @@ mod reexport {
     pub use ::coinduction::*;
 }
 
-#[::coinduction::coinduction]
+#[announce::announce]
 pub trait Count {
     fn count(&self) -> usize;
 }
@@ -14,7 +14,8 @@ pub mod defs {
     #[coinduction]
     use super::Count;
 
-    pub struct W<T>(pub Option<Box<T>>);
+    #[announce::announce]
+    pub struct W<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
 
     impl<T> Count for W<T>
     where

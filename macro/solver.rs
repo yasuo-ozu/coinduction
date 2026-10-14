@@ -18,7 +18,7 @@ pub struct Constraint {
 
 impl PartialEq for Constraint {
     fn eq(&self, other: &Self) -> bool {
-        quote!(#self).to_string() == quote!(#other).to_string()
+        crate::comparison_key(self) == crate::comparison_key(other)
     }
 }
 
@@ -26,7 +26,7 @@ impl Eq for Constraint {}
 
 impl std::hash::Hash for Constraint {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        quote!(#self).to_string().hash(state);
+        crate::comparison_key(self).hash(state);
     }
 }
 

@@ -44,6 +44,12 @@ fn get_random() -> u64 {
         .finish()
 }
 
+/// The text of `tokens`, to compare paths by. announce writes `crate::` as `$crate::` in what it
+/// sends, so `$crate` is compared as `crate`: within one crate they name the same item.
+fn comparison_key(tokens: &impl ToTokens) -> String {
+    tokens.to_token_stream().to_string().replace("$crate", "crate")
+}
+
 /// `tokens` for error messages, closer to how they are written: `a::B<C>`, not `a :: B < C >`.
 fn display(tokens: &impl ToTokens) -> String {
     let s = format!(" {} ", tokens.to_token_stream());

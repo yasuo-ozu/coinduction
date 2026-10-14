@@ -249,11 +249,7 @@ fn apply(args: &mut NextStepArgs, step: Step) {
             // New constraints on types of the module, followed through the impls of the module
             let mut module_constraints = Vec::new();
             solver.graph.scope_mut(|mut graph| {
-                let root_ix_opt = graph.node_indices().find(|ix| {
-                    let node = graph.node(*ix);
-                    template_quote::quote!(#node).to_string()
-                        == template_quote::quote!(#target).to_string()
-                });
+                let root_ix_opt = graph.node_indices().find(|ix| graph.node(*ix) == &target);
 
                 if let Some(root_ix) = root_ix_opt {
                     let dep_constraints = match &step {
@@ -338,7 +334,10 @@ fn apply(args: &mut NextStepArgs, step: Step) {
                                 );
 
                             let trait_in_working_traits = args.working_traits.iter().any(|wt| {
-                                wt == &crate::remove_path_args(&new_constraint.trait_path)
+                                crate::comparison_key(wt)
+                                    == crate::comparison_key(&crate::remove_path_args(
+                                        &new_constraint.trait_path,
+                                    ))
                             });
 
                             let is_ignored = matches!(

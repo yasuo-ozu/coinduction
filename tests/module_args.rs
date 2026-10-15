@@ -25,10 +25,19 @@ pub mod defs {
             self.0.as_ref().map_or(0, |t| t.count()) + 1
         }
     }
+
+    // `#[coinduction]` is applied again after the `cfg`s, through `crate::reexport`
+    #[cfg(any())]
+    impl<T> Count for W<T> {
+        fn count(&self) -> usize {
+            0
+        }
+    }
 }
 
 #[::coinduction::coinduction(coinduction = crate::reexport)]
 pub mod user {
+    #![allow(dead_code)]
     use super::defs::W;
     #[coinduction]
     use super::Count;

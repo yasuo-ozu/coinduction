@@ -1,7 +1,7 @@
 use core::ops::Deref;
 use proc_macro_error::abort;
 use std::collections::{HashMap, HashSet};
-use syn::{spanned::Spanned, visit::Visit, *};
+use syn::{visit::Visit, *};
 
 use crate::solver::Constraint;
 
@@ -147,96 +147,94 @@ impl Matching for Lifetime {
     }
 }
 
+/// The const parameter in `params` named `ident`, whatever its type.
+fn const_param<'a>(ident: &Ident, params: &'a HashSet<GenericParam>) -> Option<&'a GenericParam> {
+    params
+        .iter()
+        .find(|param| matches!(param, GenericParam::Const(cp) if &cp.ident == ident))
+}
+
+/// The value bound to the const parameter named `ident` in `dict`.
+fn const_value<'a>(ident: &Ident, dict: &'a Substitute) -> Option<&'a Expr> {
+    dict.iter().find_map(|(param, arg)| match (param, arg) {
+        (GenericParam::Const(cp), GenericArgument::Const(expr)) if &cp.ident == ident => Some(expr),
+        _ => None,
+    })
+}
+
+/// `expr` without the invisible groups that macro expansion may put around it.
+fn unwrap_expr_group(expr: &Expr) -> &Expr {
+    match expr {
+        Expr::Group(group) => unwrap_expr_group(&group.expr),
+        expr => expr,
+    }
+}
+
+/// A const argument written as a type (`N` in `A<N>` is parsed as a type), as an expression.
+fn type_as_expr(ty: &Type) -> Option<Expr> {
+    match ty {
+        Type::Path(TypePath { qself: None, path }) => Some(Expr::Path(ExprPath {
+            attrs: vec![],
+            qself: None,
+            path: path.clone(),
+        })),
+        Type::Group(group) => type_as_expr(&group.elem),
+        _ => None,
+    }
+}
+
 impl Matching for Expr {
     fn matches(&self, other: &Self, params: &HashSet<GenericParam>) -> Option<Substitute> {
-        match (self, other) {
-            (Expr::Path(l_path), other_expr) => {
-                if let Some(ident) = l_path.path.get_ident() {
-                    let predicate = GenericParam::Const(ConstParam {
-                        attrs: vec![],
-                        const_token: Default::default(),
-                        ident: ident.clone(),
-                        colon_token: Default::default(),
-                        ty: parse_quote!(usize),
-                        eq_token: None,
-                        default: None,
-                    });
-
-                    if params.contains(&predicate) {
-                        return Some(Substitute::from_param_arg(
-                            predicate,
-                            GenericArgument::Const(other_expr.clone()),
-                        ));
-                    }
-                }
-
-                // If not a generic parameter, check if both are paths
-                if let Expr::Path(r_path) = other_expr {
-                    l_path.path.matches(&r_path.path, params)
-                } else {
-                    None
-                }
+        let (lhs, rhs) = (unwrap_expr_group(self), unwrap_expr_group(other));
+        if let Expr::Path(ExprPath { qself: None, path, .. }) = lhs {
+            if let Some(param) = path.get_ident().and_then(|ident| const_param(ident, params)) {
+                return Some(Substitute::from_param_arg(
+                    param.clone(),
+                    GenericArgument::Const(rhs.clone()),
+                ));
             }
-            (Expr::Binary(_), Expr::Binary(_))
-            | (Expr::Call(_), Expr::Call(_))
-            | (Expr::Cast(_), Expr::Cast(_))
-            | (Expr::Index(_), Expr::Index(_))
-            | (Expr::Paren(_), Expr::Paren(_))
-            | (Expr::Array(_), Expr::Array(_))
-            | (Expr::Assign(_), Expr::Assign(_))
-            | (Expr::Block(_), Expr::Block(_))
-            | (Expr::Field(_), Expr::Field(_))
-            | (Expr::Group(_), Expr::Group(_))
-            | (Expr::Lit(_), Expr::Lit(_))
-            | (Expr::MethodCall(_), Expr::MethodCall(_))
-            | (Expr::Reference(_), Expr::Reference(_))
-            | (Expr::Repeat(_), Expr::Repeat(_))
-            | (Expr::Tuple(_), Expr::Tuple(_))
-            | (Expr::Unary(_), Expr::Unary(_))
-            | (Expr::Async(_), Expr::Async(_))
-            | (Expr::Await(_), Expr::Await(_))
-            | (Expr::Break(_), Expr::Break(_))
-            | (Expr::ForLoop(_), Expr::ForLoop(_))
-            | (Expr::If(_), Expr::If(_))
-            | (Expr::Infer(_), Expr::Infer(_))
-            | (Expr::Let(_), Expr::Let(_))
-            | (Expr::Macro(_), Expr::Macro(_))
-            | (Expr::Match(_), Expr::Match(_))
-            | (Expr::RawAddr(_), Expr::RawAddr(_))
-            | (Expr::Return(_), Expr::Return(_))
-            | (Expr::Unsafe(_), Expr::Unsafe(_))
-            | (Expr::While(_), Expr::While(_))
-            | (Expr::Yield(_), Expr::Yield(_)) => {
-                abort!(&self, "not supported"; hint = other.span() => "other token")
+        }
+        match (lhs, rhs) {
+            (Expr::Path(l_path), Expr::Path(r_path)) if l_path.qself.is_none() && r_path.qself.is_none() => {
+                l_path.path.matches(&r_path.path, params)
             }
-            _ => None,
+            (Expr::Block(l_block), r) if l_block.block.stmts.len() == 1 => match &l_block.block.stmts[0] {
+                Stmt::Expr(l_expr, None) => match r {
+                    Expr::Block(r_block) if r_block.block.stmts.len() == 1 => match &r_block.block.stmts[0] {
+                        Stmt::Expr(r_expr, None) => l_expr.matches(r_expr, params),
+                        _ => None,
+                    },
+                    r => l_expr.matches(r, params),
+                },
+                _ => None,
+            },
+            (Expr::Paren(l_paren), Expr::Paren(r_paren)) => l_paren.expr.matches(&r_paren.expr, params),
+            (l, r) => {
+                // Anything else, such as a literal, matches when it is written the same way. The
+                // impl renames its generic parameters, so they never appear in the target.
+                (crate::comparison_key(l) == crate::comparison_key(r)).then(Substitute::new)
+            }
         }
     }
 
     fn replace(&mut self, dict: &Substitute) {
-        match self {
-            Expr::Path(expr_path) => {
-                if let Some(ident) = expr_path.path.get_ident() {
-                    let predicate = GenericParam::Const(ConstParam {
-                        attrs: vec![],
-                        const_token: Default::default(),
-                        ident: ident.clone(),
-                        colon_token: Default::default(),
-                        ty: parse_quote!(usize),
-                        eq_token: None,
-                        default: None,
-                    });
-
-                    if let Some(GenericArgument::Const(new_expr)) = dict.get(&predicate) {
-                        *self = new_expr.clone();
+        struct Replacer<'a>(&'a Substitute);
+        impl syn::visit_mut::VisitMut for Replacer<'_> {
+            fn visit_expr_mut(&mut self, expr: &mut Expr) {
+                if let Expr::Path(ExprPath { qself: None, path, .. }) = expr {
+                    if let Some(value) = path.get_ident().and_then(|ident| const_value(ident, self.0)) {
+                        *expr = value.clone();
                         return;
                     }
                 }
-
-                expr_path.path.replace(dict);
+                syn::visit_mut::visit_expr_mut(self, expr);
             }
-            _ => {}
+            fn visit_type_mut(&mut self, ty: &mut Type) {
+                ty.replace(self.0);
+            }
         }
+        use syn::visit_mut::VisitMut;
+        Replacer(dict).visit_expr_mut(self);
     }
 }
 
@@ -481,8 +479,27 @@ impl Matching for PathArguments {
 impl Matching for GenericArgument {
     fn matches(&self, other: &Self, params: &HashSet<GenericParam>) -> Option<Substitute> {
         match (self, other) {
+            // A const parameter, parsed as a type (`N` in `A<N>`): it binds to a const argument,
+            // or to a path (`A<M>`, also parsed as a type)
+            (GenericArgument::Type(l_ty), r)
+                if matches!(
+                    type_as_expr(l_ty),
+                    Some(Expr::Path(ExprPath { ref path, .. }))
+                        if path.get_ident().is_some_and(|ident| const_param(ident, params).is_some())
+                ) =>
+            {
+                let r_expr = match r {
+                    GenericArgument::Const(expr) => expr.clone(),
+                    GenericArgument::Type(ty) => type_as_expr(ty)?,
+                    _ => return None,
+                };
+                type_as_expr(l_ty).unwrap().matches(&r_expr, params)
+            }
             (GenericArgument::Type(l_ty), GenericArgument::Type(r_ty)) => {
                 l_ty.matches(r_ty, params)
+            }
+            (GenericArgument::Const(l_const), GenericArgument::Type(r_ty)) => {
+                l_const.matches(&type_as_expr(r_ty)?, params)
             }
             (GenericArgument::Lifetime(l_lt), GenericArgument::Lifetime(r_lt)) => {
                 l_lt.matches(r_lt, params)
@@ -531,6 +548,12 @@ impl Matching for GenericArgument {
 
     fn replace(&mut self, dict: &Substitute) {
         match self {
+            GenericArgument::Type(Type::Path(TypePath { qself: None, path }))
+                if path.get_ident().is_some_and(|ident| const_value(ident, dict).is_some()) =>
+            {
+                let value = const_value(path.get_ident().unwrap(), dict).unwrap().clone();
+                *self = GenericArgument::Const(value);
+            }
             GenericArgument::Type(ty) => {
                 ty.replace(dict);
             }

@@ -271,6 +271,34 @@ fn trait_name(path: &Path, aliases: &[(Ident, Ident)]) -> Ident {
     last.clone()
 }
 
+/// Name the trait at `path`, written by another module (in the rules of a trait or the impls of an
+/// announced type), as the module does: replace it by a working trait of the same name, keeping
+/// the arguments of `path`. A trait imported with `#[coinduction] use` is a working trait both by
+/// its path and by its name; the one in the constraints of the module (`used`) is preferred, then
+/// the shorter one.
+fn rename_working_trait(
+    path: &mut Path,
+    working_traits: &[NoArgPath],
+    aliases: &[(Ident, Ident)],
+    used: &HashSet<String>,
+) {
+    let name = &path.segments.last().unwrap().ident;
+    let working_trait = working_traits
+        .iter()
+        .filter(|wt| {
+            &wt.0.segments.last().unwrap().ident == name || &trait_name(&wt.0, aliases) == name
+        })
+        .min_by_key(|wt| {
+            let key = crate::comparison_key(*wt);
+            (!used.contains(&key), wt.0.segments.len(), key)
+        });
+    if let Some(working_trait) = working_trait {
+        let arguments = path.segments.last().unwrap().arguments.clone();
+        *path = working_trait.0.clone();
+        path.segments.last_mut().unwrap().arguments = arguments;
+    }
+}
+
 /// Replace `path` by `to` (keeping the arguments of `path`) when it names `from`.
 fn rename_trait(path: &mut Path, from: &NoArgPath, to: &NoArgPath) {
     if crate::comparison_key(&crate::remove_path_args(path)) == crate::comparison_key(from) {
@@ -289,6 +317,7 @@ fn apply(args: &mut NextStepArgs, step: Step) {
             typ: crate::unwrap_type_group(target.typ.clone()),
             trait_path: target.trait_path.clone(),
         };
+        let (working_traits, trait_aliases) = (&args.working_traits, &args.trait_aliases);
         let rules = crate::solver::rules(&args.target_impls, |t| args.working_traits.contains(t));
         for solver in args.solvers.iter_mut().filter_map(Option::as_mut) {
             // New constraints on types of the module, followed through the impls of the module
@@ -297,20 +326,37 @@ fn apply(args: &mut NextStepArgs, step: Step) {
                 let root_ix_opt = graph.node_indices().find(|ix| graph.node(*ix) == &target);
 
                 if let Some(root_ix) = root_ix_opt {
+                    // The traits as the constraints of the module name them
+                    let used_traits = graph
+                        .node_indices()
+                        .map(|ix| {
+                            crate::comparison_key(&crate::remove_path_args(
+                                &graph.node(ix).trait_path,
+                            ))
+                        })
+                        .collect::<HashSet<_>>();
+                    let used_traits = &used_traits;
                     let dep_constraints = match &step {
                         Step::Rules(appending_constraints, trait_ident) => appending_constraints
                             .iter()
                             .flat_map(|pred| {
                                 pred.bounds.iter().map(|bound| {
                                     if let TypeParamBound::Trait(trait_bound) = bound {
-                                        // The rules name the trait as its definition does; name
-                                        // it as the target does
+                                        // The rules name the traits as the definition of the
+                                        // trait does; name them as the target and the module do
                                         let mut trait_path = trait_bound.path.clone();
                                         if &trait_path.segments.last().unwrap().ident == trait_ident {
                                             let arguments =
                                                 trait_path.segments.last().unwrap().arguments.clone();
                                             trait_path = crate::remove_path_args(&target.trait_path).0;
                                             trait_path.segments.last_mut().unwrap().arguments = arguments;
+                                        } else {
+                                            rename_working_trait(
+                                                &mut trait_path,
+                                                working_traits,
+                                                trait_aliases,
+                                                used_traits,
+                                            );
                                         }
                                         (
                                             Constraint {
@@ -366,6 +412,13 @@ fn apply(args: &mut NextStepArgs, step: Step) {
                                         if rename {
                                             rename_trait(&mut new_constraint.trait_path, &impl_trait, &target_trait);
                                         }
+                                        // Other traits in the predicates
+                                        rename_working_trait(
+                                            &mut new_constraint.trait_path,
+                                            working_traits,
+                                            trait_aliases,
+                                            used_traits,
+                                        );
                                         new_constraint.replace(&substitute);
                                         (new_constraint, params.clone())
                                     })

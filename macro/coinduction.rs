@@ -80,6 +80,24 @@ fn add_announce_meta(attrs: &mut Vec<Attribute>, meta: &TokenStream) {
     attr.meta = parse_quote!(#path(#options meta = #meta));
 }
 
+/// Collect the names that a `use` item imports under another name (`alias -> original`), and the
+/// names it imports as they are.
+fn collect_use_aliases(tree: &UseTree, aliases: &mut Vec<(Ident, Ident)>, names: &mut Vec<Ident>) {
+    match tree {
+        UseTree::Path(UsePath { tree, .. }) => collect_use_aliases(tree, aliases, names),
+        UseTree::Name(UseName { ident }) => names.push(ident.clone()),
+        UseTree::Rename(UseRename { ident, rename, .. }) if rename != "_" && ident != "self" => {
+            aliases.push((rename.clone(), ident.clone()));
+        }
+        UseTree::Group(UseGroup { items, .. }) => {
+            for tree in items {
+                collect_use_aliases(tree, aliases, names);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Collect the traits imported by a `#[coinduction] use ...;` item, both by the name they are
 /// imported as and by their full path.
 fn collect_use_traits(tree: &UseTree, prefix: &mut Path, out: &mut HashSet<NoArgPath>) {
@@ -162,6 +180,17 @@ pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
     let mut marked_traits = HashSet::new();
     // Types announced in the module: their announcements carry the predicates of their impls
     let mut announced_types = Vec::new();
+    // Names imported under another name, to compare traits by their own names. A name that is
+    // also imported as it is, as in `use path::{Count, CountMacro as Count};` for a trait whose
+    // trampoline is renamed, names that item.
+    let mut trait_aliases = Vec::new();
+    let mut imported_names = Vec::new();
+    for item in module.content.as_ref().map_or(&[][..], |c| &c.1) {
+        if let Item::Use(item_use) = item {
+            collect_use_aliases(&item_use.tree, &mut trait_aliases, &mut imported_names);
+        }
+    }
+    trait_aliases.retain(|(alias, _)| !imported_names.contains(alias));
     let (target_impls, mut other_contents): (Vec<ItemImpl>, Vec<Item>) = module
         .content
         .as_ref()
@@ -300,6 +329,7 @@ pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
         module.content.as_ref().map_or(&[][..], |c| &c.1),
         &working_traits,
         &announced_types,
+        &trait_aliases,
     );
     for item in other_contents.iter_mut() {
         if let Item::Struct(ItemStruct { attrs, ident, .. })
@@ -315,6 +345,7 @@ pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
         working_list: working_list.into_iter().collect(),
         coinduction: args.coinduction.clone(),
         working_traits: working_traits.into_iter().collect(),
+        trait_aliases,
         ignore_tys,
         solvers,
         target_impls,

@@ -1,6 +1,8 @@
 use coinduction::coinduction;
 use traitdef::{CircularTrait, ExtendedTrait, LocalTrait, TestTrait};
 
+pub trait Never {}
+
 #[coinduction]
 pub mod generic_types {
     #[coinduction]
@@ -81,6 +83,29 @@ pub mod generic_types {
         fn local_method(&self) -> usize {
             let _ = T::default();
             self.count
+        }
+    }
+
+    // A disabled impl: its predicates must not be announced (tests/cfg_impls.rs)
+    #[announce]
+    pub struct Chain<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
+
+    impl<T> LocalTrait for Chain<T>
+    where
+        T: LocalTrait,
+    {
+        fn local_method(&self) -> usize {
+            self.0.as_ref().map_or(0, |t| t.local_method()) + 1
+        }
+    }
+
+    #[cfg(any())]
+    impl<T> LocalTrait for Chain<T>
+    where
+        T: LocalTrait + crate::Never,
+    {
+        fn local_method(&self) -> usize {
+            0
         }
     }
 

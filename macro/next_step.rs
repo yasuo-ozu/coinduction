@@ -18,8 +18,8 @@ const PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// What was learned about the constraint at the front of the working list.
 pub enum Step {
-    /// The predicates of the matching rule of the trait.
-    Rules(Vec<PredicateType>),
+    /// The predicates of the matching rule of the trait, and the name of the trait.
+    Rules(Vec<PredicateType>, Ident),
     /// The predicates of the impls of the type: their generic parameters, the implemented
     /// constraint and the predicates of the impl.
     Impls(Vec<(HashSet<GenericParam>, Constraint, Vec<Constraint>)>),
@@ -104,6 +104,8 @@ pub struct NextStepArgs {
     pub working_list: VecDeque<Constraint>,
     pub(crate) coinduction: NoArgPath,
     pub(crate) working_traits: Vec<NoArgPath>,
+    /// Names imported under another name: `alias -> original`.
+    pub trait_aliases: Vec<(Ident, Ident)>,
     pub ignore_tys: HashSet<Ident>,
     pub solvers: Vec<Option<Solver>>,
     pub target_impls: Vec<ItemImpl>,
@@ -146,6 +148,23 @@ impl Parse for NextStepArgs {
         let working_traits_vec: Punctuated<NoArgPath, Token![,]> =
             working_traits_content.parse_terminated(NoArgPath::parse, Token![,])?;
         let working_traits: Vec<NoArgPath> = working_traits_vec.into_iter().collect();
+
+        input.parse::<Token![,]>()?;
+
+        // Parse trait_aliases: `[alias = original, ...]`
+        let trait_aliases_content;
+        syn::bracketed!(trait_aliases_content in input);
+        let mut trait_aliases = Vec::new();
+        while !trait_aliases_content.is_empty() {
+            let alias: Ident = trait_aliases_content.parse()?;
+            trait_aliases_content.parse::<Token![=]>()?;
+            let original: Ident = trait_aliases_content.parse()?;
+            trait_aliases.push((alias, original));
+            if trait_aliases_content.is_empty() {
+                break;
+            }
+            trait_aliases_content.parse::<Token![,]>()?;
+        }
 
         input.parse::<Token![,]>()?;
 
@@ -200,6 +219,7 @@ impl Parse for NextStepArgs {
             working_list,
             coinduction,
             working_traits,
+            trait_aliases,
             ignore_tys,
             solvers,
             target_impls,
@@ -222,17 +242,33 @@ impl ToTokens for NextStepArgs {
             .collect();
         let coinduction = &self.coinduction;
         let target_impls = &self.target_impls;
+        let aliases = self
+            .trait_aliases
+            .iter()
+            .map(|(alias, original)| quote!(#alias = #original));
 
         tokens.extend(quote! {
             #PACKAGE_VERSION,
             [#(#working_list),*],
             {#coinduction},
             [#(#working_traits),*],
+            [#(#aliases),*],
             [#(#ignore_tys),*],
             [#(#solver_tokens),*],
             [#(#target_impls),*]
         });
     }
+}
+
+/// The name of the trait at `path`: its last segment, or the original name of an alias.
+fn trait_name(path: &Path, aliases: &[(Ident, Ident)]) -> Ident {
+    let last = &path.segments.last().unwrap().ident;
+    if path.leading_colon.is_none() && path.segments.len() == 1 {
+        if let Some((_, original)) = aliases.iter().find(|(alias, _)| alias == last) {
+            return original.clone();
+        }
+    }
+    last.clone()
 }
 
 /// Replace `path` by `to` (keeping the arguments of `path`) when it names `from`.
@@ -262,15 +298,24 @@ fn apply(args: &mut NextStepArgs, step: Step) {
 
                 if let Some(root_ix) = root_ix_opt {
                     let dep_constraints = match &step {
-                        Step::Rules(appending_constraints) => appending_constraints
+                        Step::Rules(appending_constraints, trait_ident) => appending_constraints
                             .iter()
                             .flat_map(|pred| {
                                 pred.bounds.iter().map(|bound| {
                                     if let TypeParamBound::Trait(trait_bound) = bound {
+                                        // The rules name the trait as its definition does; name
+                                        // it as the target does
+                                        let mut trait_path = trait_bound.path.clone();
+                                        if &trait_path.segments.last().unwrap().ident == trait_ident {
+                                            let arguments =
+                                                trait_path.segments.last().unwrap().arguments.clone();
+                                            trait_path = crate::remove_path_args(&target.trait_path).0;
+                                            trait_path.segments.last_mut().unwrap().arguments = arguments;
+                                        }
                                         (
                                             Constraint {
                                                 typ: pred.bounded_ty.clone(),
-                                                trait_path: trait_bound.path.clone(),
+                                                trait_path,
                                             },
                                             HashSet::new(),
                                         )
@@ -307,8 +352,11 @@ fn apply(args: &mut NextStepArgs, step: Step) {
                                 // name it as the target does, also in the predicates
                                 let impl_trait = crate::remove_path_args(&replacing.trait_path);
                                 let target_trait = crate::remove_path_args(&target.trait_path);
-                                let rename = impl_trait.0.segments.last().unwrap().ident
-                                    == target_trait.0.segments.last().unwrap().ident;
+                                let impl_trait_ident = &impl_trait.0.segments.last().unwrap().ident;
+                                let rename = impl_trait_ident
+                                    == &target_trait.0.segments.last().unwrap().ident
+                                    || impl_trait_ident
+                                        == &trait_name(&target_trait.0, &args.trait_aliases);
                                 if rename {
                                     rename_trait(&mut replacing.trait_path, &impl_trait, &target_trait);
                                 }
@@ -484,9 +532,11 @@ fn fetch_type(
 /// The input is either
 /// - what an announce trampoline sends: `[LIST] KEY => [META] { ITEM } STATE`, the definition of
 ///   the trait or the type of the constraint at the front of the working list, or
-/// - `@rules [PREDICATES] STATE`, from the rule matcher of a trait, when a rule matched.
+/// - `@rules TRAIT [PREDICATES] STATE`, from the rule matcher of the trait named `TRAIT`, when a
+///   rule matched.
 pub fn next_step_macro(input: TokenStream) -> TokenStream {
     struct RulesInput {
+        trait_ident: Ident,
         predicates: Vec<PredicateType>,
         state: NextStepArgs,
     }
@@ -497,10 +547,12 @@ pub fn next_step_macro(input: TokenStream) -> TokenStream {
             if kw != "rules" {
                 return Err(syn::Error::new(kw.span(), "expected `@rules`"));
             }
+            let trait_ident = input.parse()?;
             let content;
             syn::bracketed!(content in input);
             let predicates = parse_rule_predicates(&content)?;
             Ok(RulesInput {
+                trait_ident,
                 predicates,
                 state: input.parse()?,
             })
@@ -510,10 +562,11 @@ pub fn next_step_macro(input: TokenStream) -> TokenStream {
     if matches!(input.clone().into_iter().next(), Some(proc_macro2::TokenTree::Punct(p)) if p.as_char() == '@')
     {
         let RulesInput {
+            trait_ident,
             predicates,
             mut state,
         } = parse2(input).unwrap_or_else(|e| abort!(e.span(), "{}", e));
-        apply(&mut state, Step::Rules(predicates));
+        apply(&mut state, Step::Rules(predicates, trait_ident));
         return next_step(state);
     }
 
@@ -535,7 +588,7 @@ pub fn next_step_macro(input: TokenStream) -> TokenStream {
         )
     };
     match entry.item() {
-        Ok(Item::Trait(_)) => {
+        Ok(Item::Trait(item_trait)) => {
             let rules = entry
                 .meta
                 .iter()
@@ -555,6 +608,7 @@ pub fn next_step_macro(input: TokenStream) -> TokenStream {
                     quote!($($__coinduction_rest)*),
                 );
                 crate::rules::matcher(
+                    &item_trait.ident,
                     &crate::rules::Rules { rules },
                     &crate::unwrap_type_group(target.typ.clone()),
                     fallback,

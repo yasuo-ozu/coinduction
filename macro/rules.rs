@@ -47,10 +47,11 @@ impl Parse for Rules {
 /// Match `ty` against the rules of a trait. The rules are `macro_rules!` patterns, so this emits
 /// a local `macro_rules!` with one arm per rule and calls it on `ty`.
 ///
-/// The arm of a matching rule calls `__next_step` with the predicates of the rule; when no rule
-/// matches, the last arm expands to `fallback`, with `$($__coinduction_rest)*` standing for
-/// `state`.
+/// The arm of a matching rule calls `__next_step` with the name of the trait and the predicates of
+/// the rule; when no rule matches, the last arm expands to `fallback`, with
+/// `$($__coinduction_rest)*` standing for `state`.
 pub fn matcher(
+    trait_ident: &Ident,
     rules: &Rules,
     ty: &Type,
     fallback: TokenStream,
@@ -66,7 +67,7 @@ pub fn matcher(
             #(for (pattern, constraints) in &rules.rules) {
                 ([#pattern] $($__coinduction_rest:tt)*) => {
                     #coinduction::__next_step! {
-                        @rules [#constraints] $($__coinduction_rest)*
+                        @rules #trait_ident [#constraints] $($__coinduction_rest)*
                     }
                 };
             }

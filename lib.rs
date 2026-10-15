@@ -3,8 +3,7 @@
 /// It rewrites the impls of the module so that mutually recursive `where` bounds resolve. The
 /// traits to work on are marked inside the module with `#[coinduction] use path::{TraitA, TraitB};`
 /// or by announcing them there (`#[announce] trait TraitC { ... }`); if none are marked, every
-/// trait implemented in the module is used. Accepted arguments are `marker = <path>` (a type used
-/// to refer to relative paths in the impls of announced types) and `coinduction = <path>` (the path
+/// trait implemented in the module is used. The only argument is `coinduction = <path>` (the path
 /// to this crate).
 ///
 /// Traits and types are read from other modules and crates through their
@@ -26,12 +25,6 @@ pub use coinduction_macro::coinduction;
 
 #[doc(hidden)]
 pub use coinduction_macro::__next_step;
-
-#[doc(hidden)]
-/// Trait for referencing types with markers
-pub trait TypeRef<const RANDOM: u64, const IX0: usize, const IX: usize, ARG: ?Sized> {
-    type Type: ?Sized;
-}
 
 #[cfg(doctest)]
 #[doc = include_str!("README.md")]

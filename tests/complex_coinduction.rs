@@ -1,11 +1,5 @@
 use coinduction::*;
 
-// Marker types for typedef macros
-pub struct ComputeMarker;
-pub struct StorageMarker;
-pub struct ValidationMarker;
-pub struct ComplexMarker;
-
 // Define multiple traits for complex coinduction testing
 #[announce::announce(allow_std_prelude = true)]
 trait Compute<T> {
@@ -40,7 +34,7 @@ trait Serialize<T> {
 }
 
 // Define typedef modules that create types implementing our traits
-#[coinduction(marker = super::ComputeMarker)]
+#[coinduction]
 mod compute_types {
     #[coinduction]
     use super::{Compute, Process};
@@ -72,7 +66,7 @@ mod compute_types {
     }
 }
 
-#[coinduction(marker = super::StorageMarker)]
+#[coinduction]
 mod storage_types {
     #[coinduction]
     use super::{Cache, Serialize};
@@ -119,7 +113,7 @@ mod storage_types {
     }
 }
 
-#[coinduction(marker = super::ValidationMarker)]
+#[coinduction]
 mod validation_types {
     #[coinduction]
     use super::{Transform, Validate};

@@ -131,11 +131,14 @@ fn randomize_generic_params(
 /// on the type.
 ///
 /// The impls are announced as written: announce sends `crate::` paths as `$crate::`, which
-/// resolve everywhere, and relative paths are compared as written.
+/// resolve everywhere, and relative paths are compared as written. Only a trait imported under
+/// another name (in `aliases`) is named by its own name, as the modules using the type compare
+/// traits by name.
 pub(crate) fn type_impls(
     content: &[Item],
     working_traits: &HashSet<NoArgPath>,
     announced: &[Ident],
+    aliases: &[(Ident, Ident)],
 ) -> HashMap<Ident, TokenStream> {
     let random_suffix = crate::get_random();
     let crate_version = env!("CARGO_PKG_VERSION");
@@ -181,15 +184,28 @@ pub(crate) fn type_impls(
             random_suffix,
         );
 
-        let constraint = Constraint {
+        let unalias = |path: &mut Path| {
+            if path.leading_colon.is_none() && path.segments.len() == 1 {
+                if let Some((_, original)) =
+                    aliases.iter().find(|(alias, _)| alias == &path.segments[0].ident)
+                {
+                    path.segments[0].ident = original.clone();
+                }
+            }
+        };
+        let mut constraint = Constraint {
             typ: renamed_self_ty,
             trait_path: renamed_trait_path,
         };
+        unalias(&mut constraint.trait_path);
         let mut children = Vec::new();
         Constraint::map_generics(&mut renamed_generics.clone(), |c| {
             children.push(c.clone());
             vec![c]
         });
+        for child in children.iter_mut() {
+            unalias(&mut child.trait_path);
+        }
         type_impl_table
             .entry(segments[0].ident.clone())
             .or_default()

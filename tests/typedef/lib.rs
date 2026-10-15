@@ -1,10 +1,7 @@
 use coinduction::coinduction;
 use traitdef::{CircularTrait, ExtendedTrait, LocalTrait, TestTrait};
 
-pub struct TypedefMarker;
-pub struct LocalTypeMarker;
-
-#[coinduction(marker = TypedefMarker)]
+#[coinduction]
 pub mod generic_types {
     #[coinduction]
     use super::{CircularTrait, ExtendedTrait, LocalTrait, TestTrait};
@@ -139,7 +136,7 @@ pub mod generic_types {
     }
 }
 
-#[coinduction(marker = LocalTypeMarker)]
+#[coinduction]
 pub mod local_types {
     #[coinduction]
     use super::LocalTrait;

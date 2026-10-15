@@ -1,4 +1,4 @@
-error: expected `marker = <path>` or `coinduction = <path>`; mark traits with `#[coinduction] use ...;` inside the module, or announce them there with `#[announce] trait ...`
+error: expected `coinduction = <path>`; mark traits with `#[coinduction] use ...;` inside the module, or announce them there with `#[announce] trait ...`
  --> tests/ui/module_arguments.rs:3:15
   |
 3 | #[coinduction(Count)]

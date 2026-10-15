@@ -265,6 +265,12 @@ resolve there: `::core::option::Option` rather than `Option` (or
 the [`announce` documentation](https://docs.rs/announce) for the rules, and its `repeater` option
 for types that are private to the defining crate.
 
+The impls of an announced type are added to its announcement as written. Other `#[coinduction]`
+modules compare them with their own bounds token by token: a `crate::` path matches the same
+`crate::` path, and an imported name such as `Local` matches where it is imported under the same
+name. A predicate of these impls can end up in the bounds of the impls of another module, so it
+should resolve there too.
+
 ### Rules for Other Types
 
 A bound on a type that no `#[coinduction]` module describes, such as a tuple, is resolved with
@@ -318,9 +324,7 @@ assert_eq!(list.size(), 2);
 
 ## Attribute Arguments
 
-- **Module**: `#[coinduction(marker = path, coinduction = path)]`
-  - `marker`: a type used to refer to relative paths in the impls of announced types. Without
-    it, announcing a type whose impls use relative paths is an error
+- **Module**: `#[coinduction(coinduction = path)]`
   - `coinduction`: override the path used to refer to this crate (default `::coinduction`)
 - **Inside a module**: `#[coinduction] use ...;` marks the imported traits; it takes no arguments
 - **Trait**: `#[announce(meta = coinduction::rules((pattern) => { predicates }, ...))]`

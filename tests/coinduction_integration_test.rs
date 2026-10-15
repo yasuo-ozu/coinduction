@@ -1250,32 +1250,6 @@ fn test_failure_generic_type_parameter_constraints() {
 }
 */
 
-/*
-#[test]
-fn test_failure_marker_trait_type_mismatch() {
-    // This demonstrates failures related to TypeRef and marker traits
-    // when types don't match expected patterns
-
-    use coinduction::TypeRef;
-    use integration_circular::*;
-    use std::marker::PhantomData;
-
-    // If we tried to use a marker with an incompatible type:
-    struct IncompatibleType {
-        data: String,
-    }
-
-    // This would fail if the marker wasn't set up for this type:
-    // let _: <TestMarker as TypeRef<IncompatibleType>>::Type = IncompatibleType {
-    //     data: "test".to_string(),
-    // };
-    // ERROR: TypeRef not implemented for this combination
-
-    // The coinduction system's TypeRef implementations are generated specifically
-    // for the types and markers defined in the system, so arbitrary combinations fail.
-}
-*/
-
 #[test]
 fn test_error_message_documentation() {
     // This test serves as documentation for the specific error messages

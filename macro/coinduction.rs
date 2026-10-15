@@ -125,29 +125,26 @@ mod kw {
     syn::custom_keyword!(coinduction);
 }
 
-/// Arguments of `#[coinduction(...)]` on a module: `marker = <path>` and `coinduction = <path>`.
+/// Arguments of `#[coinduction(...)]` on a module: `coinduction = <path>`.
 pub struct ModuleArgs {
     coinduction: NoArgPath,
-    marker: Option<Path>,
 }
 
 impl Parse for ModuleArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut coinduction = None;
-        let mut marker = None;
         while !input.is_empty() {
-            if input.peek(kw::marker) && input.peek2(Token![=]) && marker.is_none() {
-                input.parse::<kw::marker>()?;
-                input.parse::<Token![=]>()?;
-                marker = Some(input.parse()?);
-            } else if input.peek(kw::coinduction) && input.peek2(Token![=]) && coinduction.is_none()
-            {
+            if input.peek(kw::coinduction) && input.peek2(Token![=]) && coinduction.is_none() {
                 input.parse::<kw::coinduction>()?;
                 input.parse::<Token![=]>()?;
                 coinduction = Some(input.parse()?);
+            } else if input.peek(kw::marker) {
+                return Err(input.error(
+                    "`marker` is no longer needed: the impls of announced types are announced as written",
+                ));
             } else {
                 return Err(input.error(
-                    "expected `marker = <path>` or `coinduction = <path>`; mark traits with `#[coinduction] use ...;` inside the module, or announce them there with `#[announce] trait ...`",
+                    "expected `coinduction = <path>`; mark traits with `#[coinduction] use ...;` inside the module, or announce them there with `#[announce] trait ...`",
                 ));
             }
             if !input.is_empty() {
@@ -156,7 +153,6 @@ impl Parse for ModuleArgs {
         }
         Ok(ModuleArgs {
             coinduction: coinduction.unwrap_or_else(|| NoArgPath(parse_quote!(::coinduction))),
-            marker,
         })
     }
 }
@@ -300,12 +296,10 @@ pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
             Some(solver)
         })
         .collect();
-    let (impls_metas, typeref_impls) = crate::typedef::type_impls(
+    let impls_metas = crate::typedef::type_impls(
         module.content.as_ref().map_or(&[][..], |c| &c.1),
         &working_traits,
         &announced_types,
-        args.marker.as_ref(),
-        &args.coinduction,
     );
     for item in other_contents.iter_mut() {
         if let Item::Struct(ItemStruct { attrs, ident, .. })
@@ -334,7 +328,6 @@ pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
         #{ &module.ident } {
             #(for content in other_contents) { #content }
             #next
-            #typeref_impls
         }
     }
 }

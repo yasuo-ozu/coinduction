@@ -235,6 +235,15 @@ impl ToTokens for NextStepArgs {
     }
 }
 
+/// Replace `path` by `to` (keeping the arguments of `path`) when it names `from`.
+fn rename_trait(path: &mut Path, from: &NoArgPath, to: &NoArgPath) {
+    if crate::comparison_key(&crate::remove_path_args(path)) == crate::comparison_key(from) {
+        let arguments = path.segments.last().unwrap().arguments.clone();
+        *path = to.0.clone();
+        path.segments.last_mut().unwrap().arguments = arguments;
+    }
+}
+
 /// Record `step`, what was learned about the constraint at the front of the working list, in the
 /// solvers, and remove the constraint from the list.
 fn apply(args: &mut NextStepArgs, step: Step) {
@@ -291,13 +300,21 @@ fn apply(args: &mut NextStepArgs, step: Step) {
                                         crate::display(replacing_typ)
                                     ),
                                 }
-                                if &replacing.trait_path.segments.last().unwrap().ident == &target.trait_path.segments.last().unwrap().ident {
-                                    let mut new_path = target.trait_path.clone();
-                                    new_path.segments.last_mut().unwrap().arguments = replacing.trait_path.segments.last().unwrap().arguments.clone();
+                                // The impls also name the trait as the module of the type does;
+                                // name it as the target does, also in the predicates
+                                let impl_trait = crate::remove_path_args(&replacing.trait_path);
+                                let target_trait = crate::remove_path_args(&target.trait_path);
+                                let rename = impl_trait.0.segments.last().unwrap().ident
+                                    == target_trait.0.segments.last().unwrap().ident;
+                                if rename {
+                                    rename_trait(&mut replacing.trait_path, &impl_trait, &target_trait);
                                 }
                                 replacing.matches(&unwrapped_target, &params).map(|substitute| {
                                     new_constraints.iter().map(move |new_constraint0| {
                                         let mut new_constraint = new_constraint0.clone();
+                                        if rename {
+                                            rename_trait(&mut new_constraint.trait_path, &impl_trait, &target_trait);
+                                        }
                                         new_constraint.replace(&substitute);
                                         (new_constraint, params.clone())
                                     })

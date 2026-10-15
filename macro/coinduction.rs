@@ -177,7 +177,114 @@ impl Parse for ModuleArgs {
     }
 }
 
+/// Whether `attrs` has a `#[cfg(...)]` attribute.
+fn has_cfg(attrs: &[Attribute]) -> bool {
+    attrs.iter().any(|attr| attr.path().is_ident("cfg"))
+}
+
+/// Evaluate the `#[cfg(...)]` attributes of the impls in `module`, and apply `#[coinduction]`
+/// again to the module with the impls that exist. An attribute macro sees the impls that a `cfg`
+/// removes, and they would take part in the resolution and the announced impls.
+///
+/// The `cfg`s are evaluated by a chain of `macro_rules!`, one for each conditional impl: the
+/// definition under `#[cfg(P)]` adds the impl to the list it passes on, and the one under
+/// `#[cfg(not(P))]` drops it. The last one emits the module. The items are passed as input, so
+/// that `$` in them is not read by the chain.
+fn eval_cfg_impls(module: ItemMod, args: &ModuleArgs) -> TokenStream {
+    let random = crate::get_random();
+    let name = |ix: usize| {
+        Ident::new(
+            &format!("__coinduction_cfg_{}_{}_{}", module.ident, ix, random),
+            proc_macro2::Span::call_site(),
+        )
+    };
+    let (inner_attrs, outer_attrs): (Vec<_>, Vec<_>) = module
+        .attrs
+        .iter()
+        .partition(|attr| matches!(attr.style, AttrStyle::Inner(_)));
+    let (conditional, items): (Vec<_>, Vec<_>) = module
+        .content
+        .as_ref()
+        .map_or(&[][..], |(_, items)| items)
+        .iter()
+        .cloned()
+        .partition(|item| matches!(item, Item::Impl(item_impl) if has_cfg(&item_impl.attrs)));
+    let conditional = conditional
+        .into_iter()
+        .map(|item| {
+            let Item::Impl(mut item_impl) = item else {
+                unreachable!()
+            };
+            let (cfgs, attrs) = item_impl
+                .attrs
+                .into_iter()
+                .partition::<Vec<_>, _>(|attr| attr.path().is_ident("cfg"));
+            item_impl.attrs = attrs;
+            let cfgs = cfgs
+                .iter()
+                .map(|attr| {
+                    attr.meta
+                        .require_list()
+                        .map(|list| list.tokens.clone())
+                        .unwrap_or_else(|e| abort!(e.span(), "{}", e))
+                })
+                .collect::<Vec<_>>();
+            (quote!(all(#(#cfgs),*)), item_impl)
+        })
+        .collect::<Vec<_>>();
+    let coinduction = &args.coinduction;
+    let last = name(conditional.len());
+    quote! {
+        #(for (ix, (cfg, _)) in conditional.iter().enumerate()) {
+            #[cfg(#cfg)]
+            macro_rules! #{name(ix)} {
+                (
+                    [$($__coinduction_impls:tt)*] {$($__coinduction_items:tt)*}
+                    {$($__coinduction_impl:tt)*} $($__coinduction_rest:tt)*
+                ) => {
+                    #{name(ix + 1)}! {
+                        [$($__coinduction_impls)* $($__coinduction_impl)*]
+                        {$($__coinduction_items)*} $($__coinduction_rest)*
+                    }
+                };
+            }
+            #[cfg(not(#cfg))]
+            macro_rules! #{name(ix)} {
+                (
+                    [$($__coinduction_impls:tt)*] {$($__coinduction_items:tt)*}
+                    {$($__coinduction_impl:tt)*} $($__coinduction_rest:tt)*
+                ) => {
+                    #{name(ix + 1)}! {
+                        [$($__coinduction_impls)*] {$($__coinduction_items)*} $($__coinduction_rest)*
+                    }
+                };
+            }
+        }
+        macro_rules! #last {
+            ([$($__coinduction_impls:tt)*] {$($__coinduction_items:tt)*}) => {
+                #[#coinduction::coinduction(coinduction = #coinduction)]
+                #(#outer_attrs)*
+                #{&module.vis} #{&module.unsafety} #{&module.mod_token} #{&module.ident} {
+                    $($__coinduction_items)*
+                    $($__coinduction_impls)*
+                }
+            };
+        }
+        #{name(0)}! {
+            [] { #(#inner_attrs)* #(#items)* }
+            #(for (_, item_impl) in &conditional) { {#item_impl} }
+        }
+    }
+}
+
 pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
+    if module.content.as_ref().is_some_and(|(_, items)| {
+        items
+            .iter()
+            .any(|item| matches!(item, Item::Impl(item_impl) if has_cfg(&item_impl.attrs)))
+    }) {
+        return eval_cfg_impls(module, &args);
+    }
     // Traits marked with `#[coinduction] use ...;` or announced in the module
     let mut marked_traits = HashSet::new();
     // Types announced in the module: their announcements carry the predicates of their impls
@@ -424,11 +531,16 @@ pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
     };
     let next = next_step(next_step_args);
     quote! {
-        #(for attr in &module.attrs) {#attr}
+        #(for attr in &module.attrs) {
+            #(if matches!(attr.style, AttrStyle::Outer)) { #attr }
+        }
         #{ &module.vis }
         #{ &module.unsafety }
         #{ &module.mod_token }
         #{ &module.ident } {
+            #(for attr in &module.attrs) {
+                #(if matches!(attr.style, AttrStyle::Inner(_))) { #attr }
+            }
             #(for content in other_contents) { #content }
             #next
         }

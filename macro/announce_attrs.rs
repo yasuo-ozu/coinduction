@@ -30,10 +30,14 @@ pub struct AnnounceNames {
 /// The imports of `tree`: the imported path, and the name it is imported as.
 fn imports(tree: &UseTree, prefix: &mut Vec<Ident>, out: &mut Vec<(Vec<Ident>, Ident)>) {
     let mut import = |ident: &Ident, name: &Ident| {
-        out.push((
-            [&prefix[..], std::slice::from_ref(ident)].concat(),
-            name.clone(),
-        ))
+        // `{self}` and `{self as name}` import the module itself
+        let (path, name) = match prefix.last() {
+            Some(last) if ident == "self" => {
+                (prefix.to_vec(), if name == "self" { last } else { name })
+            }
+            _ => ([&prefix[..], std::slice::from_ref(ident)].concat(), name),
+        };
+        out.push((path, name.clone()))
     };
     match tree {
         UseTree::Path(UsePath { ident, tree, .. }) => {
@@ -106,9 +110,11 @@ impl AnnounceNames {
         this
     }
 
+    /// The last entry wins: an import shadows the defaults, as it shadows the extern prelude.
     fn lookup(&self, item: &str, name: &Ident) -> Option<bool> {
         self.names
             .iter()
+            .rev()
             .find(|(i, n, _)| i == item && n == name)
             .map(|(_, _, via)| *via)
     }
@@ -329,6 +335,35 @@ mod tests {
             ("#[a]", "#[a(crate=::coinduction::announce,meta=m,)]"),
         ] {
             assert_eq!(add(&n, attrs), expected);
+        }
+        // Imported from the re-export under the names of the defaults
+        let own = names(&["use coinduction::announce::announce;"]);
+        let krate = names(&["use coinduction::announce;"]);
+        let krate_self = names(&["use coinduction::announce::{self};"]);
+        let alias_self = names(&["use coinduction::{announce::{self as ann}};"]);
+        for (names, attrs, expected) in [
+            (
+                &own,
+                "#[announce]",
+                "#[announce(crate=::coinduction::announce,meta=m,)]",
+            ),
+            (
+                &krate,
+                "#[announce::announce]",
+                "#[announce::announce(crate=::coinduction::announce,meta=m,)]",
+            ),
+            (
+                &krate_self,
+                "#[announce::announce]",
+                "#[announce::announce(crate=::coinduction::announce,meta=m,)]",
+            ),
+            (
+                &alias_self,
+                "#[ann::announce]",
+                "#[ann::announce(crate=::coinduction::announce,meta=m,)]",
+            ),
+        ] {
+            assert_eq!(add(names, attrs), expected);
         }
         // Without `meta`: only `crate = ..` through the re-export
         for (attrs, expected) in [

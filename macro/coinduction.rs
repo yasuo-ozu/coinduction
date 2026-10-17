@@ -104,7 +104,10 @@ impl Parse for ModuleArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut coinduction = None;
         while !input.is_empty() {
-            if input.peek(kw::coinduction) && input.peek2(Token![=]) && coinduction.is_none() {
+            if input.peek(kw::coinduction) && input.peek2(Token![=]) {
+                if coinduction.is_some() {
+                    return Err(input.error("duplicate `coinduction` argument"));
+                }
                 input.parse::<kw::coinduction>()?;
                 input.parse::<Token![=]>()?;
                 coinduction = Some(input.parse()?);

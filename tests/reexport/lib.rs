@@ -69,6 +69,59 @@ pub mod wrappers {
     }
 }
 
+// The attribute imported from the re-export under its own name, and the re-export under the name of
+// the crate (also with `self`): the imports shadow announce's own names
+#[coinduction]
+pub mod own_names {
+    #[coinduction]
+    use super::Count;
+    use coinduction::announce::announce;
+
+    #[announce]
+    pub struct Plain<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
+
+    impl<T> Count for Plain<T>
+    where
+        T: Count,
+    {
+        fn count(&self) -> usize {
+            self.0.as_ref().map_or(0, |t| t.count()) + 4
+        }
+    }
+}
+
+#[coinduction]
+pub mod crate_name {
+    #[coinduction]
+    use super::Count;
+    use coinduction::announce;
+    use coinduction::announce::{self as announce_self};
+
+    #[announce::announce]
+    pub struct CrateName<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
+
+    impl<T> Count for CrateName<T>
+    where
+        T: Count,
+    {
+        fn count(&self) -> usize {
+            self.0.as_ref().map_or(0, |t| t.count()) + 5
+        }
+    }
+
+    #[announce_self::announce]
+    pub struct SelfAlias<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
+
+    impl<T> Count for SelfAlias<T>
+    where
+        T: Count,
+    {
+        fn count(&self) -> usize {
+            self.0.as_ref().map_or(0, |t| t.count()) + 6
+        }
+    }
+}
+
 // A trait announced in a `#[coinduction]` module gets `crate = ::coinduction::announce` too
 #[coinduction]
 pub mod local {

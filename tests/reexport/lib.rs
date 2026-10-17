@@ -68,3 +68,33 @@ pub mod wrappers {
         }
     }
 }
+
+// A trait announced in a `#[coinduction]` module gets `crate = ::coinduction::announce` too
+#[coinduction]
+pub mod local {
+    #[coinduction::announce::announce]
+    pub trait Depth {
+        fn depth(&self) -> usize;
+    }
+
+    pub struct Node(pub Option<Box<Leaf>>);
+    pub struct Leaf(pub Option<Box<Node>>);
+
+    impl Depth for Node
+    where
+        Leaf: Depth,
+    {
+        fn depth(&self) -> usize {
+            self.0.as_ref().map_or(0, |n| n.depth()) + 1
+        }
+    }
+
+    impl Depth for Leaf
+    where
+        Node: Depth,
+    {
+        fn depth(&self) -> usize {
+            self.0.as_ref().map_or(0, |n| n.depth()) + 1
+        }
+    }
+}

@@ -275,13 +275,27 @@ fn trait_name(path: &Path, aliases: &[(Ident, Ident)]) -> Ident {
 /// announced type), as the module does: replace it by a working trait of the same name, keeping
 /// the arguments of `path`. A trait imported with `#[coinduction] use` is a working trait both by
 /// its path and by its name; the one in the constraints of the module (`used`) is preferred, then
-/// the shorter one.
+/// the shorter one. A path from another crate's root (`::core::clone::Clone`) names that trait,
+/// not one of the module, so it is renamed only when it is a working trait itself.
 fn rename_working_trait(
     path: &mut Path,
     working_traits: &[NoArgPath],
     aliases: &[(Ident, Ident)],
     used: &HashSet<String>,
 ) {
+    let idents = |path: &Path| {
+        path.segments
+            .iter()
+            .map(|seg| seg.ident.to_string())
+            .collect::<Vec<_>>()
+    };
+    let segments = idents(path);
+    let relative = path.leading_colon.is_none()
+        && (segments.len() == 1
+            || ["crate", "$crate", "self", "super"].contains(&segments[0].as_str()));
+    if !relative && !working_traits.iter().any(|wt| idents(&wt.0) == segments) {
+        return;
+    }
     let name = &path.segments.last().unwrap().ident;
     let working_trait = working_traits
         .iter()

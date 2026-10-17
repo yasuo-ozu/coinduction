@@ -1,4 +1,4 @@
-// `#[coinduction]` is no longer applied to traits: they are announced.
+// `#[coinduction]` applies only to modules.
 use coinduction::coinduction;
 
 #[coinduction]

@@ -1,4 +1,4 @@
-// A trait in a module is announced, not marked with `#[coinduction]`.
+// In a module, `#[coinduction]` applies only to `use` items, not to traits.
 use coinduction::coinduction;
 
 #[coinduction]

@@ -1,4 +1,4 @@
-// `#[coinduction(macro_name = ..)]` on a type is replaced by `#[announce(macro_name = ..)]`.
+// In a module, `#[coinduction]` applies only to `use` items, not to types.
 use coinduction::coinduction;
 
 #[announce::announce]

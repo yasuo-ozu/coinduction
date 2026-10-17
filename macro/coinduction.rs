@@ -341,21 +341,6 @@ pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
                     item_use.attrs.push(parse_quote!(#[allow(unused_imports)]));
                     others.push(Item::Use(item_use));
                 }
-                (Item::Trait(item_trait), Some(_)) => abort!(
-                    item_trait.ident,
-                    "`#[coinduction]` is no longer applied to traits";
-                    help = "announce the trait with `#[announce::announce]`; traits announced in a `#[coinduction]` module are worked on"
-                ),
-                (
-                    Item::Struct(ItemStruct { ident, .. })
-                    | Item::Enum(ItemEnum { ident, .. })
-                    | Item::Union(ItemUnion { ident, .. }),
-                    Some(_),
-                ) => abort!(
-                    ident,
-                    "`#[coinduction]` is no longer applied to types";
-                    help = "announce the type with `#[announce::announce]` to make its impls visible to other `#[coinduction]` modules; rename its macro with `#[announce::announce(macro_name = ...)]`"
-                ),
                 (item, Some(_)) => abort!(
                     item,
                     "`#[coinduction]` in a `#[coinduction]` module can only be applied to `use` items"

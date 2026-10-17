@@ -597,8 +597,9 @@ fn fetch_type(
 /// `__next_step`: the callback of the macro chain that a `#[coinduction]` module starts.
 ///
 /// The input is either
-/// - what an announce trampoline sends: `[LIST] KEY => [META] { ITEM } STATE`, the definition of
-///   the trait or the type of the constraint at the front of the working list, or
+/// - what an announce trampoline sends, `@announce_format ".." [LIST] KEY => [META] { ITEM }
+///   STATE`: the definition of the trait or the type of the constraint at the front of the
+///   working list, or
 /// - `@rules TRAIT [PREDICATES] STATE`, from the rule matcher of the trait named `TRAIT`, when a
 ///   rule matched.
 pub fn next_step_macro(input: TokenStream) -> TokenStream {
@@ -626,7 +627,10 @@ pub fn next_step_macro(input: TokenStream) -> TokenStream {
         }
     }
 
-    if matches!(input.clone().into_iter().next(), Some(proc_macro2::TokenTree::Punct(p)) if p.as_char() == '@')
+    // A call of announce starts with `@announce_format ".."`
+    let mut tokens = input.clone().into_iter();
+    if matches!(tokens.next(), Some(proc_macro2::TokenTree::Punct(p)) if p.as_char() == '@')
+        && matches!(tokens.next(), Some(proc_macro2::TokenTree::Ident(kw)) if kw == "rules")
     {
         let RulesInput {
             trait_ident,

@@ -14,7 +14,7 @@ path = "lib.rs"
 proc-macro2 = "1.0"
 proc-macro-error = { version = "1.0", default-features = false }
 # `announce::helper`: the parser of what announce trampolines send to `__next_step`.
-announce = "0.1.1"
+announce = "0.2.0"
 template-quote = "0.4.0"
 safegraph = { version = "0.1.0", default-features = false }
 

@@ -50,7 +50,7 @@ impl Parse for Rules {
 /// The arm of a matching rule calls `__next_step` with the name of the trait and the predicates of
 /// the rule; when no rule matches, the last arm expands to `fallback`, with
 /// `$($__coinduction_rest)*` standing for `state`.
-pub fn matcher(
+pub(crate) fn matcher(
     trait_ident: &Ident,
     rules: &Rules,
     ty: &Type,

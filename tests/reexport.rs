@@ -5,12 +5,21 @@ use coinduction::coinduction;
 
 #[coinduction]
 pub mod cycle {
+    use reexport::crate_name::{CrateName, SelfAlias};
+    use reexport::own_names::Plain;
     use reexport::wrappers::{ByPath, CrateAlias, CrateAliasMacro as CrateAlias, Imported};
     #[coinduction]
     use reexport::Count;
 
     // Through the announced types
-    pub struct Node(pub ByPath<Leaf>, pub Imported<Leaf>, pub CrateAlias<Leaf>);
+    pub struct Node(
+        pub ByPath<Leaf>,
+        pub Imported<Leaf>,
+        pub CrateAlias<Leaf>,
+        pub Plain<Leaf>,
+        pub CrateName<Leaf>,
+        pub SelfAlias<Leaf>,
+    );
     pub struct Leaf(pub Option<Box<Node>>);
 
     impl Count for Node
@@ -18,9 +27,13 @@ pub mod cycle {
         ByPath<Leaf>: Count,
         Imported<Leaf>: Count,
         CrateAlias<Leaf>: Count,
+        Plain<Leaf>: Count,
+        CrateName<Leaf>: Count,
+        SelfAlias<Leaf>: Count,
     {
         fn count(&self) -> usize {
-            self.0.count() + self.1.count() + self.2.count()
+            let Node(a, b, c, d, e, f) = self;
+            a.count() + b.count() + c.count() + d.count() + e.count() + f.count()
         }
     }
 
@@ -77,11 +90,20 @@ pub mod depth {
 #[test]
 fn reexport() {
     use cycle::{Leaf, List, Node};
+    use reexport::crate_name::{CrateName, SelfAlias};
+    use reexport::own_names::Plain;
     use reexport::wrappers::*;
     use reexport::Count;
-    let node = Node(ByPath(None), Imported(None), CrateAlias(None));
-    assert_eq!(node.count(), 1 + 2 + 3);
-    assert_eq!(Leaf(Some(Box::new(node))).count(), 7);
+    let node = Node(
+        ByPath(None),
+        Imported(None),
+        CrateAlias(None),
+        Plain(None),
+        CrateName(None),
+        SelfAlias(None),
+    );
+    assert_eq!(node.count(), 1 + 2 + 3 + 4 + 5 + 6);
+    assert_eq!(Leaf(Some(Box::new(node))).count(), 22);
     assert_eq!(List(Some(Box::new((1, List(None))))).count(), 1);
 }
 

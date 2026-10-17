@@ -15,8 +15,8 @@
 ///   `#[announce(meta = coinduction::rules((<pattern>) => { <predicates> }, ...))]`, where
 ///   `<pattern>` is a `macro_rules!` pattern matched against the type.
 /// - A struct, enum or union in a `#[coinduction]` module that is announced, with `#[announce]`,
-///   carries the predicates of its impls in its announcement, so that other `#[coinduction]`
-///   modules can see through bounds on it.
+///   carries the predicates of its impls of the traits the module works on in its announcement, so
+///   that other `#[coinduction]` modules can see through bounds on it.
 ///
 /// `#[coinduction]` modules look up the trampolines by the trait or type name, so a trampoline
 /// renamed with `#[announce(macro_name = ...)]` must be imported under that name where the trait

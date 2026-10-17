@@ -1,7 +1,9 @@
 //! The rules of a trait and the impls of an announced type name another trait differently from
 //! the module using them.
 #![allow(dead_code)]
+mod common;
 use coinduction::*;
+use common::traitdef;
 
 pub mod traits {
     #[announce::announce(meta = coinduction::rules(
@@ -192,7 +194,7 @@ pub mod aliased {
 // that one
 #[coinduction]
 pub mod std_trait {
-    use traitdef::LocalTrait;
+    use crate::traitdef::LocalTrait;
 
     #[derive(Default)]
     pub struct Node(pub Option<Box<(u8, Node)>>);

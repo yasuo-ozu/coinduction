@@ -1,6 +1,8 @@
 //! Impls under `#[cfg(...)]` take part in the resolution, and are announced, only where they
 //! exist.
 #![allow(dead_code)]
+mod common;
+use common::{traitdef, typedef};
 use coinduction::*;
 
 #[announce::announce]
@@ -193,8 +195,8 @@ pub mod r#type {
 #[coinduction]
 pub mod cross_crate {
     #[coinduction]
-    use traitdef::LocalTrait;
-    use typedef::generic_types::Chain;
+    use crate::traitdef::LocalTrait;
+    use crate::typedef::generic_types::Chain;
 
     pub struct Link(pub Chain<Link>);
 
@@ -211,8 +213,8 @@ pub mod cross_crate {
 #[test]
 fn cross_crate_disabled_impl() {
     use cross_crate::Link;
-    use traitdef::LocalTrait;
-    use typedef::generic_types::Chain;
+    use crate::traitdef::LocalTrait;
+    use crate::typedef::generic_types::Chain;
     let link = Link(Chain(Some(Box::new(Link(Chain(None))))));
     assert_eq!(link.local_method(), 4);
 }

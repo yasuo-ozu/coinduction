@@ -1,5 +1,7 @@
+mod common;
+use common::{traitdef, typedef};
 use coinduction::*;
-use traitdef::{CircularTrait, LocalTrait, TestTrait};
+use crate::traitdef::{CircularTrait, LocalTrait, TestTrait};
 
 // Local types that exist only in this crate
 pub struct InternalType(pub f64);
@@ -42,13 +44,13 @@ pub mod integration_circular {
     use super::*;
     use std::marker::PhantomData;
     #[coinduction]
-    use traitdef::{CircularTrait, LocalTrait, TestTrait};
+    use crate::traitdef::{CircularTrait, LocalTrait, TestTrait};
 
     impl<T: 'static + Clone + Send> CircularTrait for NodeA<T>
     where
         NodeA<T>: Clone,
-        typedef::generic_types::Container<NodeB<T>, InternalType>: LocalTrait,
-        typedef::generic_types::ConstrainedStruct<std::iter::Once<NodeC<T>>>: CircularTrait,
+        crate::typedef::generic_types::Container<NodeB<T>, InternalType>: LocalTrait,
+        crate::typedef::generic_types::ConstrainedStruct<std::iter::Once<NodeC<T>>>: CircularTrait,
     {
         fn circular_method(&self) -> Box<dyn CircularTrait> {
             Box::new(NodeB::<T> {
@@ -226,7 +228,7 @@ pub mod integration_circular {
     // Implementations with where clauses using traits and types from test crates
     impl<T> TestTrait for NodeA<T>
     where
-        typedef::generic_types::Container<NodeB<T>, NodeC<T>>: LocalTrait,
+        crate::typedef::generic_types::Container<NodeB<T>, NodeC<T>>: LocalTrait,
     {
         fn test_method(&self) -> String {
             format!("NodeA: {}", self.value)
@@ -244,8 +246,8 @@ pub mod integration_circular {
     impl<T: 'static + Clone + Send> CircularTrait for NodeB<T>
     where
         T: Clone,
-        typedef::generic_types::Wrapper<NodeA<T>>: LocalTrait,
-        typedef::generic_types::MultiGeneric<NodeC<T>, NodeB<T>, String>: CircularTrait,
+        crate::typedef::generic_types::Wrapper<NodeA<T>>: LocalTrait,
+        crate::typedef::generic_types::MultiGeneric<NodeC<T>, NodeB<T>, String>: CircularTrait,
     {
         fn circular_method(&self) -> Box<dyn CircularTrait> {
             Box::new(NodeC::<T> {
@@ -262,7 +264,7 @@ pub mod integration_circular {
         T: Clone,
         NodeA<T>: TestTrait,
         NodeB<T>: LocalTrait,
-        typedef::generic_types::Container<NodeA<T>, NodeB<T>>: LocalTrait,
+        crate::typedef::generic_types::Container<NodeA<T>, NodeB<T>>: LocalTrait,
     {
         fn circular_method(&self) -> Box<dyn CircularTrait> {
             Box::new(NodeA::<T> {
@@ -275,7 +277,7 @@ pub mod integration_circular {
 
     impl<T: Clone> CoinductionLocalTrait for NodeA<T>
     where
-        typedef::generic_types::Wrapper<NodeB<T>>: LocalTrait,
+        crate::typedef::generic_types::Wrapper<NodeB<T>>: LocalTrait,
     {
         fn coinduction_method(&self) -> f64 {
             self.value.len() as f64
@@ -308,7 +310,7 @@ impl CoinductionLocalTrait for InternalType {
 
 #[test]
 fn test_basic_functionality() {
-    use typedef::local_types::LocalType;
+    use crate::typedef::local_types::LocalType;
 
     let local_type = LocalType("Hello, World!".to_string());
     assert_eq!(local_type.local_method(), 13); // "Hello, World!".len() = 13
@@ -359,7 +361,7 @@ fn test_circular_coinduction() {
 
     // For NodeA TestTrait: Container<NodeB<()>, NodeC<()>>: LocalTrait
     // For NodeA TestTrait: Wrapper<NodeA<()>>: CircularTrait
-    use typedef::generic_types::{Container, Wrapper};
+    use crate::typedef::generic_types::{Container, Wrapper};
 
     // Create instances that match the where clause types
     let container_instance = Container {
@@ -379,7 +381,7 @@ fn test_circular_coinduction() {
 
 #[test]
 fn test_complex_circular_references() {
-    use typedef::generic_types::{Container, Wrapper};
+    use crate::typedef::generic_types::{Container, Wrapper};
 
     // Test the new generic structure
     let container = Container {
@@ -424,7 +426,7 @@ fn test_complex_circular_references() {
 #[test]
 fn test_circular_types_usage() {
     // Test using generic types from new module structure
-    use typedef::generic_types::{ConstrainedStruct, MultiGeneric};
+    use crate::typedef::generic_types::{ConstrainedStruct, MultiGeneric};
 
     let multi_generic = MultiGeneric {
         primary: "test circular A".to_string(),
@@ -542,7 +544,7 @@ fn test_trait_bound_requirements_without_derive() {
 
     use integration_circular::*;
     use std::marker::PhantomData;
-    use typedef::generic_types::{Container, Wrapper};
+    use crate::typedef::generic_types::{Container, Wrapper};
 
     let node_a = NodeA::<()> {
         value: "test_bounds".to_string(),
@@ -600,7 +602,7 @@ fn test_coinduction_system_trait_analysis() {
 
     use integration_circular::*;
     use std::marker::PhantomData;
-    use typedef::generic_types::{Container, Wrapper};
+    use crate::typedef::generic_types::{Container, Wrapper};
 
     // ANALYSIS: Required trait implementations for coinduction system participation
 
@@ -750,7 +752,7 @@ fn test_failure_missing_clone_implementation() {
     // error[E0277]: the trait bound `NodeA<()>: Clone` is not satisfied
 
     use integration_circular::*;
-    use typedef::generic_types::Wrapper;
+    use crate::typedef::generic_types::Wrapper;
     use std::marker::PhantomData;
 
     let node_a = NodeA::<()> {
@@ -775,7 +777,7 @@ fn test_failure_missing_debug_implementation() {
     // error[E0277]: `NodeA<()>` doesn't implement `Debug`
 
     use integration_circular::*;
-    use typedef::generic_types::Wrapper;
+    use crate::typedef::generic_types::Wrapper;
     use std::marker::PhantomData;
 
     let node_a = NodeA::<()> {
@@ -802,7 +804,7 @@ fn test_failure_missing_tostring_implementation() {
     // error[E0277]: `NodeA<()>` doesn't implement `ToString`
 
     use integration_circular::*;
-    use typedef::generic_types::Wrapper;
+    use crate::typedef::generic_types::Wrapper;
     use std::marker::PhantomData;
 
     let node_a = NodeA::<()> {
@@ -829,7 +831,7 @@ fn test_failure_missing_send_sync_implementation() {
     // error[E0277]: `NodeB<()>` cannot be sent between threads safely
 
     use integration_circular::*;
-    use typedef::generic_types::Container;
+    use crate::typedef::generic_types::Container;
     use std::marker::PhantomData;
 
     let node_b = NodeB::<()> {
@@ -864,7 +866,7 @@ fn test_failure_missing_hash_implementation() {
     // error[E0277]: the trait bound `NodeC<()>: Hash` is not satisfied
 
     use integration_circular::*;
-    use typedef::generic_types::Container;
+    use crate::typedef::generic_types::Container;
     use std::marker::PhantomData;
 
     let node_b = NodeB::<()> {
@@ -941,7 +943,7 @@ fn test_failure_missing_multiple_traits() {
     // multiple error messages at once
 
     use integration_circular::*;
-    use typedef::generic_types::Wrapper;
+    use crate::typedef::generic_types::Wrapper;
     use std::marker::PhantomData;
 
     // Without any trait implementations, this struct would be nearly unusable
@@ -993,7 +995,7 @@ fn test_working_implementations_documentation() {
 
     use integration_circular::*;
     use std::marker::PhantomData;
-    use typedef::generic_types::{Container, Wrapper};
+    use crate::typedef::generic_types::{Container, Wrapper};
 
     // Our implementations work because they satisfy all required trait bounds:
 
@@ -1081,7 +1083,7 @@ fn test_failure_partial_trait_implementation() {
     // // impl<T> ToString for NodeA<T> { ... }   ✗ Missing!
 
     use integration_circular::*;
-    use typedef::generic_types::Wrapper;
+    use crate::typedef::generic_types::Wrapper;
     use std::marker::PhantomData;
 
     let node_a = NodeA::<()> {
@@ -1146,7 +1148,7 @@ fn test_failure_coinduction_expansion_trait_mismatch() {
     // a type that doesn't implement the required trait.
 
     use integration_circular::*;
-    use typedef::generic_types::Container;
+    use crate::typedef::generic_types::Container;
     use std::marker::PhantomData;
 
     // If we had a where clause like:
@@ -1224,7 +1226,7 @@ fn test_failure_generic_type_parameter_constraints() {
     // in the coinduction system
 
     use integration_circular::*;
-    use typedef::generic_types::Container;
+    use crate::typedef::generic_types::Container;
     use std::marker::PhantomData;
 
     // If we tried to use NodeA with a type parameter that doesn't meet requirements:
@@ -1308,7 +1310,7 @@ fn test_error_message_documentation() {
 #[test]
 fn demo_clone_failure() {
     use integration_circular::*;
-    use typedef::generic_types::Wrapper;
+    use crate::typedef::generic_types::Wrapper;
     use std::marker::PhantomData;
 
     let node_a = NodeA::<()> {

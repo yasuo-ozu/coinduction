@@ -47,7 +47,10 @@ fn get_random() -> u64 {
 /// The text of `tokens`, to compare paths by. announce writes `crate::` as `$crate::` in what it
 /// sends, so `$crate` is compared as `crate`: within one crate they name the same item.
 fn comparison_key(tokens: &impl ToTokens) -> String {
-    tokens.to_token_stream().to_string().replace("$crate", "crate")
+    tokens
+        .to_token_stream()
+        .to_string()
+        .replace("$crate", "crate")
 }
 
 /// `tokens` for error messages, closer to how they are written: `a::B<C>`, not `a :: B < C >`.
@@ -88,11 +91,6 @@ pub fn coinduction(attr: TokenStream, input: TokenStream) -> TokenStream {
             let args = parse_macro_input!(attr as coinduction::ModuleArgs);
             coinduction::coinduction(item, args).into()
         }
-        Item::Trait(item) => abort!(
-            item.ident,
-            "`#[coinduction]` is no longer applied to traits";
-            help = "announce the trait with `#[announce::announce]`, and give its rules with `#[announce::announce(meta = coinduction::rules(...))]`"
-        ),
         item => abort!(item, "`#[coinduction]` can only be applied to a `mod`"),
     }
 }

@@ -156,13 +156,14 @@ impl AnnounceNames {
         attrs.iter().any(|attr| self.find(&attr.meta))
     }
 
-    /// Add `meta = <add>` to the options of the first `#[announce]` attribute of an item. An
-    /// announcement through the re-export also gets `crate = <coinduction>::announce`, unless it
-    /// has a `crate` option; with no `add`, that is the only change.
+    /// Add `meta = <add>` to the options of every `#[announce]` attribute of an item, as a `cfg`
+    /// may remove any of them; announce drops the duplicates when it merges them. An announcement
+    /// through the re-export also gets `crate = <coinduction>::announce`, unless it has a `crate`
+    /// option; with no `add`, that is the only change.
     pub fn add_meta(&self, attrs: &mut [Attribute], add: Option<&TokenStream>) {
-        attrs
-            .iter_mut()
-            .any(|attr| self.add_meta_to(&mut attr.meta, add));
+        for attr in attrs {
+            self.add_meta_to(&mut attr.meta, add);
+        }
     }
 
     fn add_meta_to(&self, meta: &mut Meta, add: Option<&TokenStream>) -> bool {
@@ -170,7 +171,9 @@ impl AnnounceNames {
             let Some((predicate, mut metas)) = cfg_attr_parts(meta) else {
                 return false;
             };
-            let added = metas.iter_mut().any(|meta| self.add_meta_to(meta, add));
+            let added = metas
+                .iter_mut()
+                .fold(false, |added, meta| self.add_meta_to(meta, add) | added);
             if added {
                 *meta = parse_quote!(cfg_attr(#predicate, #metas));
             }
@@ -318,10 +321,18 @@ mod tests {
                 "#[cfg_attr(test, cfg_attr(unix, announce))]",
                 "#[cfg_attr(test,cfg_attr(unix,announce(meta=m,)))]",
             ),
-            // The first announcement only
+            // Every announcement
             (
                 "#[announce] #[announce(allow_primitive = true)]",
-                "#[announce(meta=m,)]#[announce(allow_primitive=true)]",
+                "#[announce(meta=m,)]#[announce(meta=m,allow_primitive=true)]",
+            ),
+            (
+                "#[cfg_attr(test, announce, announce(allow_primitive = true))]",
+                "#[cfg_attr(test,announce(meta=m,),announce(meta=m,allow_primitive=true))]",
+            ),
+            (
+                "#[announce] #[coinduction::announce::announce]",
+                "#[announce(meta=m,)]#[coinduction::announce::announce(crate=::coinduction::announce,meta=m,)]",
             ),
             // Through the re-export: `crate = ..` unless given
             (

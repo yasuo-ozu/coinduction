@@ -1,11 +1,14 @@
 use proc_macro_error::abort;
 use safegraph::graph::Graph;
 use safegraph::VecGraph;
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::*;
 use template_quote::{quote, ToTokens};
+
+use crate::matching::Matching;
+use crate::NoArgPath;
 
 #[derive(Clone, Debug)]
 pub struct Constraint {
@@ -188,6 +191,180 @@ impl Parse for ConstraintTuple {
 pub struct Solver {
     pub graph: VecGraph<Constraint, ()>,
     pub generic_params: HashSet<GenericParam>,
+}
+
+/// The constructor of `typ` and its type arguments: `Wrap < _ >` and `[T]` for `Wrap<T>`.
+fn split_type(typ: &Type) -> (String, Vec<Type>) {
+    let mut typ = crate::unwrap_type_group(typ.clone());
+    let mut args = Vec::new();
+    let mut take = |t: &mut Type| args.push(core::mem::replace(t, parse_quote!(_)));
+    match &mut typ {
+        Type::Path(TypePath { qself: None, path }) => {
+            for segment in &mut path.segments {
+                if let PathArguments::AngleBracketed(arguments) = &mut segment.arguments {
+                    for argument in &mut arguments.args {
+                        if let GenericArgument::Type(t) = argument {
+                            take(t);
+                        }
+                    }
+                }
+            }
+        }
+        Type::Tuple(TypeTuple { elems, .. }) => elems.iter_mut().for_each(&mut take),
+        Type::Reference(TypeReference { elem, .. })
+        | Type::Array(TypeArray { elem, .. })
+        | Type::Slice(TypeSlice { elem, .. })
+        | Type::Ptr(TypePtr { elem, .. }) => take(elem),
+        _ => (),
+    }
+    (quote!(#typ).to_string(), args)
+}
+
+/// Whether `big` is the type `small` grown: the same constructor, with each type argument of
+/// `small` embedded in the one of `big`. `G<Wrap<T>>` grows from `G<T>`.
+fn grows(small: &Type, big: &Type) -> bool {
+    let ((small_head, small_args), (big_head, big_args)) = (split_type(small), split_type(big));
+    small_head == big_head
+        && small_args.len() == big_args.len()
+        && small_args
+            .iter()
+            .zip(&big_args)
+            .all(|(s, b)| embedded(s, b))
+}
+
+/// Whether `big` is `small`, possibly grown, with types around it: `T` in `Wrap<T>`.
+fn embedded(small: &Type, big: &Type) -> bool {
+    grows(small, big) || split_type(big).1.iter().any(|arg| embedded(small, arg))
+}
+
+/// An impl of the module: its generics, the constraint it implements and its predicates.
+pub type Rule = (Generics, Constraint, Vec<Constraint>);
+
+/// The impls of the module for the traits it works on.
+pub(crate) fn rules(impls: &[ItemImpl], is_working: impl Fn(&NoArgPath) -> bool) -> Vec<Rule> {
+    impls
+        .iter()
+        .filter_map(|item_impl| {
+            let trait_path = &item_impl.trait_.as_ref().unwrap().1;
+            is_working(&crate::remove_path_args(trait_path)).then(|| {
+                let mut predicates = Vec::new();
+                Constraint::map_generics(&mut item_impl.generics.clone(), |c| {
+                    predicates.push(c.clone());
+                    vec![c]
+                });
+                (
+                    item_impl.generics.clone(),
+                    Constraint {
+                        typ: item_impl.self_ty.as_ref().clone(),
+                        trait_path: trait_path.clone(),
+                    },
+                    predicates,
+                )
+            })
+        })
+        .collect()
+}
+
+impl Solver {
+    /// Follow the impls of the module from the constraints `from`, as long as their types are
+    /// types of the module (`module_tys`) or generic parameters of the impl. Return the constraints
+    /// on other types reached on the way, which the macros of their traits answer.
+    pub(crate) fn expand(
+        &mut self,
+        from: &[Constraint],
+        rules: &[Rule],
+        module_tys: &HashSet<Ident>,
+        is_working: impl Fn(&NoArgPath) -> bool,
+    ) -> Vec<Constraint> {
+        let generic_params = &self.generic_params;
+        let mut external = Vec::new();
+        self.graph.scope_mut(|mut graph| {
+            let mut local_working_list = VecDeque::new();
+            for constraint in from {
+                let existing_node = graph.node_indices().find(|ix| graph.node(*ix) == constraint);
+                local_working_list
+                    .push_back(existing_node.unwrap_or_else(|| graph.insert_node(constraint.clone()).unwrap()));
+            }
+            let mut iteration_count = 0;
+            const MAX_ITERATIONS: usize = 1000;
+            const MAX_GROWTH: usize = 8;
+            while let Some(node_id) = local_working_list.pop_front() {
+                let constraint = graph.node(node_id).clone();
+                iteration_count += 1;
+                if iteration_count > MAX_ITERATIONS {
+                    abort!(
+                        &constraint.trait_path,
+                        "Maximum iteration limit reached ({}). Possible infinite loop in coinduction resolution.",
+                        MAX_ITERATIONS
+                    );
+                }
+                if !is_working(&crate::remove_path_args(&constraint.trait_path)) {
+                    continue;
+                }
+                let unwrapped_typ = crate::unwrap_type_group(constraint.typ.clone());
+                let is_module_type = matches!(&unwrapped_typ, Type::Path(p) if p.path.segments.len() == 1 && module_tys.contains(&p.path.segments[0].ident));
+                let is_generic = matches!(&unwrapped_typ, Type::Path(p) if p.path.segments.len() == 1 &&
+                    generic_params.iter().any(|param|
+                        matches!(param, GenericParam::Type(tp) if tp.ident == p.path.segments[0].ident)
+                    )
+                );
+
+                if !is_module_type && !is_generic {
+                    if !external.contains(&constraint) {
+                        external.push(constraint);
+                    }
+                    continue;
+                }
+                // A type of the module that comes back grown each time never closes a loop
+                if is_module_type {
+                    let trait_key = quote!(#{&constraint.trait_path}).to_string();
+                    let grown = graph
+                        .node_indices()
+                        .map(|ix| graph.node(ix))
+                        .filter(|node| {
+                            *node != &constraint
+                                && quote!(#{&node.trait_path}).to_string() == trait_key
+                                && grows(&node.typ, &unwrapped_typ)
+                        })
+                        .count();
+                    if grown >= MAX_GROWTH {
+                        abort!(
+                            &constraint.typ,
+                            "coinduction: `{}` grows without end through the impls",
+                            quote!(#constraint)
+                        );
+                    }
+                }
+
+                // The type of an answer may arrive in an invisible group
+                let unwrapped = Constraint {
+                    typ: unwrapped_typ,
+                    trait_path: constraint.trait_path.clone(),
+                };
+                for (generics, rule_constraint, rule_constraints) in rules {
+                    let params: HashSet<_> = generics.params.iter().cloned().collect();
+                    if let Some(substitution) = rule_constraint.matches(&unwrapped, &params) {
+                        for mut new_constraint in rule_constraints.clone() {
+                            new_constraint.replace(&substitution);
+                            let existing_node = graph
+                                .node_indices()
+                                .find(|id| *graph.node(*id) == new_constraint);
+                            let new_node_id = if let Some(id) = existing_node {
+                                id
+                            } else {
+                                let n = graph.insert_node(new_constraint.clone()).unwrap();
+                                local_working_list.push_back(n);
+                                n
+                            };
+                            graph.insert_edge((), [node_id, new_node_id]).unwrap();
+                        }
+                        break;
+                    }
+                }
+            }
+        });
+        external
+    }
 }
 
 impl Parse for Solver {

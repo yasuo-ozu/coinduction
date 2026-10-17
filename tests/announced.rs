@@ -1,17 +1,19 @@
 //! Traits and types announced with `announce`, as `#[coinduction]` modules see them.
+mod common;
+use common::traitdef;
 
 use coinduction::coinduction;
-use traitdef::Size;
+use crate::traitdef::Size;
 
 // `(A, u8): Size` resolves through the rules of `Size` in another crate, back to `A: Size`.
 #[coinduction]
 pub mod rule_cycle {
     #[coinduction]
-    use traitdef::Size;
+    use crate::traitdef::Size;
 
     pub struct A(pub Option<Box<(A, u8)>>);
 
-    impl traitdef::Countable for A {}
+    impl crate::traitdef::Countable for A {}
 
     impl Size for A
     where
@@ -27,7 +29,7 @@ pub mod rule_cycle {
 #[coinduction]
 pub mod wrapper {
     #[coinduction]
-    use traitdef::Size;
+    use crate::traitdef::Size;
 
     #[announce::announce]
     pub struct Boxed<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
@@ -48,7 +50,7 @@ pub mod wrapper {
 pub mod wrapper_user {
     use super::wrapper::Boxed;
     #[coinduction]
-    use traitdef::Size;
+    use crate::traitdef::Size;
 
     pub struct Node(pub Boxed<Node>);
 

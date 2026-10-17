@@ -10,176 +10,169 @@ use template_quote::quote;
 
 use crate::NoArgPath;
 
-/// A name of announce's attribute macro, derive or crate, and whether it is reached through the
-/// re-export `<coinduction>::announce`. The generated code of such an announcement is given
-/// `crate = <coinduction>::announce`, so that the crate need not depend on announce.
-type Name = (Ident, bool);
-
-/// How the module names announce's attribute macro and its derive.
+/// How the module names announce's crate, attribute macro and derive.
 ///
-/// A path names them when it is `<announce>::announce` or `<announce>::Announce`, `<announce>`
-/// being the name of the announce dependency in the crate's `Cargo.toml` (renames included) or
-/// a name the module imports `<coinduction>::announce` as, or when it is
-/// `<coinduction>::announce::announce` or `<coinduction>::announce::Announce`. A single name does
-/// when the module imports it from there, also under another name, or when the module does not
-/// import that name from another crate (it may come from a glob import or from an outer module).
-/// Attributes inside `#[cfg_attr(..)]` count too.
+/// A path names the attribute macro (the derive) when it is `<announce>::announce`
+/// (`<announce>::Announce`), `<announce>` being the name of the announce dependency in the crate's
+/// `Cargo.toml` (renames included) or a name the module imports `<coinduction>::announce` as, or
+/// when it is `<coinduction>::announce::announce` (`::Announce`). A single name does when the
+/// module imports it from there, also under another name, or when the module does not import that
+/// name from another crate (it may come from a glob import or from an outer module). Attributes
+/// inside `#[cfg_attr(..)]` count too.
 pub struct AnnounceNames {
     coinduction: NoArgPath,
-    crates: Vec<Name>,
-    attrs: Vec<Name>,
-    derives: Vec<Name>,
+    /// `(item, name, via)`: `item` is `crate`, `announce` or `Announce`, and `via` whether it is
+    /// reached through the re-export `<coinduction>::announce`. The generated code of such an
+    /// announcement is given `crate = <coinduction>::announce`, so that the crate need not depend
+    /// on announce.
+    names: Vec<(String, Ident, bool)>,
 }
 
-/// Whether `path` is `prefix` followed by `rest`, comparing the names only.
-fn is_path(path: &[&Ident], prefix: &NoArgPath, rest: &[&str]) -> bool {
-    let prefix = prefix.0.segments.iter().map(|seg| &seg.ident).collect::<Vec<_>>();
-    path.len() == prefix.len() + rest.len()
-        && path.iter().zip(&prefix).all(|(a, b)| a == b)
-        && path[prefix.len()..].iter().zip(rest).all(|(a, b)| a == b)
+/// The imports of `tree`: the imported path, and the name it is imported as.
+fn imports(tree: &UseTree, prefix: &mut Vec<Ident>, out: &mut Vec<(Vec<Ident>, Ident)>) {
+    let mut import = |ident: &Ident, name: &Ident| {
+        out.push((
+            [&prefix[..], std::slice::from_ref(ident)].concat(),
+            name.clone(),
+        ))
+    };
+    match tree {
+        UseTree::Path(UsePath { ident, tree, .. }) => {
+            prefix.push(ident.clone());
+            imports(tree, prefix, out);
+            prefix.pop();
+        }
+        UseTree::Name(UseName { ident }) => import(ident, ident),
+        UseTree::Rename(UseRename { ident, rename, .. }) => import(ident, rename),
+        UseTree::Group(UseGroup { items, .. }) => {
+            items.iter().for_each(|tree| imports(tree, prefix, out))
+        }
+        UseTree::Glob(_) => {}
+    }
 }
 
 impl AnnounceNames {
     pub(crate) fn new(items: &[Item], coinduction: &NoArgPath) -> Self {
         let krate = announce::machinery::Options::default().krate();
         let span = proc_macro2::Span::call_site();
-        let mut names = AnnounceNames {
+        let mut this = AnnounceNames {
             coinduction: coinduction.clone(),
-            crates: vec![(krate.segments.last().unwrap().ident.clone(), false)],
-            attrs: vec![(Ident::new("announce", span), false)],
-            derives: vec![(Ident::new("Announce", span), false)],
+            names: vec![
+                (
+                    "crate".into(),
+                    krate.segments.last().unwrap().ident.clone(),
+                    false,
+                ),
+                ("announce".into(), Ident::new("announce", span), false),
+                ("Announce".into(), Ident::new("Announce", span), false),
+            ],
         };
-        let uses = items
-            .iter()
-            .filter_map(|item| match item {
-                Item::Use(item_use) => Some(&item_use.tree),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
+        let mut uses = Vec::new();
+        for item in items {
+            if let Item::Use(item_use) = item {
+                imports(&item_use.tree, &mut Vec::new(), &mut uses);
+            }
+        }
         // The names of the crate first: `use coinduction::announce as ann; use ann::Announce;`
-        for tree in &uses {
-            names.collect_imports(tree, &mut Vec::new(), &mut Vec::new(), true);
+        for (path, name) in &uses {
+            if this.is_reexport(path, &[]) {
+                this.names.push(("crate".into(), name.clone(), true));
+            }
         }
         let mut foreign = Vec::new();
-        for tree in &uses {
-            names.collect_imports(tree, &mut Vec::new(), &mut foreign, false);
-        }
-        names.attrs.retain(|(name, _)| !foreign.contains(name));
-        names.derives.retain(|(name, _)| !foreign.contains(name));
-        names
-    }
-
-    /// Record the names of the announce crate that `tree` imports (`crates`), or the names of its
-    /// attribute macro and derive, and in `foreign` the names it imports from another crate.
-    fn collect_imports(
-        &mut self,
-        tree: &UseTree,
-        prefix: &mut Vec<Ident>,
-        foreign: &mut Vec<Ident>,
-        crates: bool,
-    ) {
-        let mut import = |ident: &Ident, name: &Ident, prefix: &[Ident]| {
-            let mut path = prefix.iter().collect::<Vec<_>>();
-            path.push(ident);
-            if crates {
-                if is_path(&path, &self.coinduction, &["announce"]) {
-                    self.crates.push((name.clone(), true));
-                }
-                return;
-            }
-            let reexport = is_path(&path[..path.len() - 1], &self.coinduction, &["announce"]);
-            let krate = match prefix {
-                [krate] => self.crates.iter().find(|(name, _)| name == krate).map(|(_, via)| *via),
+        for (path, name) in &uses {
+            let (item, prefix) = path.split_last().unwrap();
+            let item = item.to_string();
+            let from = match prefix {
+                _ if this.is_reexport(prefix, &[]) => Some(true),
+                [krate] => this.lookup("crate", krate),
                 _ => None,
             };
-            let from = if reexport { Some(true) } else { krate };
-            let first = prefix.first();
-            match (from, ident.to_string().as_str()) {
-                (Some(via), "announce") => self.attrs.push((name.clone(), via)),
-                (Some(via), "Announce") => self.derives.push((name.clone(), via)),
-                _ if is_path(&path, &self.coinduction, &["announce"]) => {}
-                _ if first.is_some_and(|first| {
+            let announce = item == "announce" || item == "Announce";
+            match from {
+                Some(via) if announce => this.names.push((item, name.clone(), via)),
+                _ if this.is_reexport(path, &[]) => {}
+                _ if prefix.first().is_some_and(|first| {
                     first != "crate" && first != "self" && first != "super"
                 }) =>
                 {
                     foreign.push(name.clone())
                 }
                 // A re-export in this crate: it may be announce's
-                (None, "announce") => self.attrs.push((name.clone(), false)),
-                (None, "Announce") => self.derives.push((name.clone(), false)),
+                _ if announce => this.names.push((item, name.clone(), false)),
                 _ => {}
             }
-        };
-        match tree {
-            UseTree::Path(UsePath { ident, tree, .. }) => {
-                prefix.push(ident.clone());
-                self.collect_imports(tree, prefix, foreign, crates);
-                prefix.pop();
-            }
-            UseTree::Name(UseName { ident }) => import(ident, ident, prefix),
-            UseTree::Rename(UseRename { ident, rename, .. }) => import(ident, rename, prefix),
-            UseTree::Group(UseGroup { items, .. }) => {
-                for tree in items {
-                    self.collect_imports(tree, prefix, foreign, crates);
-                }
-            }
-            UseTree::Glob(_) => {}
+        }
+        this.names
+            .retain(|(item, name, _)| item == "crate" || !foreign.contains(name));
+        this
+    }
+
+    fn lookup(&self, item: &str, name: &Ident) -> Option<bool> {
+        self.names
+            .iter()
+            .find(|(i, n, _)| i == item && n == name)
+            .map(|(_, _, via)| *via)
+    }
+
+    /// Whether `path` is `<coinduction>::announce` followed by `rest`.
+    fn is_reexport(&self, path: &[Ident], rest: &[&str]) -> bool {
+        let expected = self
+            .coinduction
+            .0
+            .segments
+            .iter()
+            .map(|seg| seg.ident.to_string());
+        let expected = expected.chain(["announce"].iter().chain(rest).map(|s| s.to_string()));
+        path.iter().map(|ident| ident.to_string()).eq(expected)
+    }
+
+    /// Whether `path` names `item` (`announce` or `Announce`), and whether through the re-export.
+    fn names(&self, path: &Path, item: &str) -> Option<bool> {
+        let segments = path
+            .segments
+            .iter()
+            .map(|seg| seg.ident.clone())
+            .collect::<Vec<_>>();
+        match &segments[..] {
+            [name] if path.leading_colon.is_none() => self.lookup(item, name),
+            [krate, last] if last == item => self.lookup("crate", krate),
+            _ => self.is_reexport(&segments, &[item]).then_some(true),
         }
     }
 
-    /// Whether `path` names announce's attribute macro (`leaf` = `announce`) or derive (`leaf` =
-    /// `Announce`), given the single names in `names`; and whether through the re-export.
-    fn names(&self, path: &Path, names: &[Name], leaf: &str) -> Option<bool> {
-        let segments = path.segments.iter().map(|seg| &seg.ident).collect::<Vec<_>>();
-        match segments[..] {
-            [name] if path.leading_colon.is_none() => {
-                names.iter().find(|(n, _)| n == name).map(|(_, via)| *via)
-            }
-            [krate, last] if last == leaf => {
-                self.crates.iter().find(|(n, _)| n == krate).map(|(_, via)| *via)
-            }
-            _ => is_path(&segments, &self.coinduction, &["announce", leaf]).then_some(true),
-        }
-    }
-
-    /// Whether `meta` is `#[announce]` / `#[announce(...)]`: the attribute macro, or the helper
-    /// attribute of `#[derive(Announce)]`.
-    fn attr(&self, meta: &Meta) -> Option<bool> {
-        self.names(meta.path(), &self.attrs, "announce")
-    }
-
-    /// The predicates of the `cfg_attr`s around the first `#[derive(Announce)]` in `meta`, and
-    /// whether the derive is reached through the re-export.
-    fn derive_cfgs(&self, meta: &Meta, mut cfgs: Vec<Meta>) -> Option<(Vec<Meta>, bool)> {
-        if meta.path().is_ident("derive") {
-            let paths = meta
+    /// The `#[announce]` attribute (`item` = `announce`) or `#[derive(Announce)]` (`Announce`) in
+    /// `meta`: the predicates of the `cfg_attr`s around it, and whether it is reached through the
+    /// re-export.
+    fn find(&self, meta: &Meta, item: &str, mut cfgs: Vec<Meta>) -> Option<(Vec<Meta>, bool)> {
+        let via = match item {
+            "announce" => self.names(meta.path(), item),
+            _ if meta.path().is_ident("derive") => meta
                 .require_list()
                 .ok()?
                 .parse_args_with(Punctuated::<Path, Token![,]>::parse_terminated)
-                .ok()?;
-            paths
+                .ok()?
                 .iter()
-                .find_map(|path| self.names(path, &self.derives, "Announce"))
-                .map(|via| (cfgs, via))
-        } else {
-            let (predicate, metas) = cfg_attr_parts(meta)?;
-            cfgs.push(predicate);
-            metas
-                .iter()
-                .find_map(|meta| self.derive_cfgs(meta, cfgs.clone()))
+                .find_map(|path| self.names(path, item)),
+            _ => None,
+        };
+        if let Some(via) = via {
+            return Some((cfgs, via));
         }
-    }
-
-    fn announces(&self, meta: &Meta) -> bool {
-        self.attr(meta).is_some()
-            || self.derive_cfgs(meta, Vec::new()).is_some()
-            || cfg_attr_parts(meta)
-                .is_some_and(|(_, metas)| metas.iter().any(|meta| self.announces(meta)))
+        let (predicate, metas) = cfg_attr_parts(meta)?;
+        cfgs.push(predicate);
+        metas
+            .iter()
+            .find_map(|meta| self.find(meta, item, cfgs.clone()))
     }
 
     /// Whether the item is announced: it has `#[announce]`, or derives `Announce`.
     pub fn is_announced(&self, attrs: &[Attribute]) -> bool {
-        attrs.iter().any(|attr| self.announces(&attr.meta))
+        attrs.iter().any(|attr| {
+            ["announce", "Announce"]
+                .iter()
+                .any(|item| self.find(&attr.meta, item, Vec::new()).is_some())
+        })
     }
 
     /// Add `meta = <add>` to the options of the announcement of an item: to its `#[announce(...)]`
@@ -189,25 +182,22 @@ impl AnnounceNames {
     pub fn add_meta(&self, attrs: &mut Vec<Attribute>, add: &TokenStream) {
         let derive = attrs
             .iter()
-            .find_map(|attr| self.derive_cfgs(&attr.meta, Vec::new()));
-        for attr in attrs.iter_mut() {
-            if self.add_meta_to(&mut attr.meta, add, derive.as_ref().map(|(_, via)| *via)) {
-                return;
-            }
+            .find_map(|attr| self.find(&attr.meta, "Announce", Vec::new()));
+        let via = derive.as_ref().map(|(_, via)| *via);
+        if attrs
+            .iter_mut()
+            .any(|attr| self.add_meta_to(&mut attr.meta, add, via))
+        {
+            return;
         }
         let (cfgs, via) = derive.unwrap_or_default();
-        let krate = via.then(|| self.krate());
-        if cfgs.is_empty() {
-            attrs.push(parse_quote!(#[announce(#krate meta = #add)]));
+        let mut helper = parse_quote!(announce);
+        self.add_meta_to(&mut helper, add, Some(via));
+        attrs.push(if cfgs.is_empty() {
+            parse_quote!(#[#helper])
         } else {
-            attrs.push(parse_quote!(#[cfg_attr(all(#(#cfgs),*), announce(#krate meta = #add))]));
-        }
-    }
-
-    /// `crate = <coinduction>::announce,`
-    fn krate(&self) -> TokenStream {
-        let coinduction = &self.coinduction;
-        quote!(crate = #coinduction::announce,)
+            parse_quote!(#[cfg_attr(all(#(#cfgs),*), #helper)])
+        });
     }
 
     /// `derive`: whether the derive of the item is reached through the re-export, if it derives
@@ -215,54 +205,48 @@ impl AnnounceNames {
     fn add_meta_to(&self, meta: &mut Meta, add: &TokenStream, derive: Option<bool>) -> bool {
         let via = match derive {
             Some(via) if meta.path().is_ident("announce") => Some(via),
-            _ => self.attr(meta),
+            _ => self.names(meta.path(), "announce"),
         };
-        if let Some(via) = via {
-            let path = meta.path().clone();
-            let options = match &*meta {
-                Meta::Path(_) => TokenStream::new(),
-                Meta::List(list) => {
-                    let mut options = list.tokens.clone();
-                    if !options.is_empty()
-                        && !matches!(options.clone().into_iter().last(), Some(proc_macro2::TokenTree::Punct(p)) if p.as_char() == ',')
-                    {
-                        options.extend(quote!(,));
-                    }
-                    options
-                }
-                Meta::NameValue(_) => abort!(meta, "expected `#[announce]` or `#[announce(...)]`"),
+        let Some(via) = via else {
+            let Some((predicate, mut metas)) = cfg_attr_parts(meta) else {
+                return false;
             };
-            let has_krate = parse2::<announce::machinery::Options>(options.clone())
-                .is_ok_and(|options| options.krate.is_some());
-            let krate = (via && !has_krate).then(|| self.krate());
-            *meta = parse_quote!(#path(#options #krate meta = #add));
-            true
-        } else if let Some((predicate, mut metas)) = cfg_attr_parts(meta) {
-            let added = metas.iter_mut().any(|meta| self.add_meta_to(meta, add, derive));
+            let added = metas
+                .iter_mut()
+                .any(|meta| self.add_meta_to(meta, add, derive));
             if added {
                 *meta = parse_quote!(cfg_attr(#predicate, #metas));
             }
-            added
-        } else {
-            false
-        }
+            return added;
+        };
+        let options = match &*meta {
+            Meta::Path(_) => TokenStream::new(),
+            Meta::List(list) => list.tokens.clone(),
+            Meta::NameValue(_) => abort!(meta, "expected `#[announce]` or `#[announce(...)]`"),
+        };
+        let has_krate = parse2::<announce::machinery::Options>(options.clone())
+            .is_ok_and(|options| options.krate.is_some());
+        let coinduction = &self.coinduction;
+        let krate = (via && !has_krate).then(|| quote!(crate = #coinduction::announce,));
+        let path = meta.path().clone();
+        *meta = parse_quote!(#path(#krate meta = #add, #options));
+        true
     }
 }
 
 /// The predicate and the attributes of `cfg_attr(<predicate>, <attributes>)`.
 fn cfg_attr_parts(meta: &Meta) -> Option<(Meta, Punctuated<Meta, Token![,]>)> {
-    let Meta::List(list) = meta else {
-        return None;
-    };
-    if !list.path.is_ident("cfg_attr") {
+    if !meta.path().is_ident("cfg_attr") {
         return None;
     }
-    list.parse_args_with(|input: ParseStream| {
-        let predicate = input.parse()?;
-        input.parse::<Token![,]>()?;
-        Ok((predicate, Punctuated::parse_terminated(input)?))
-    })
-    .ok()
+    meta.require_list()
+        .ok()?
+        .parse_args_with(|input: ParseStream| {
+            let predicate = input.parse()?;
+            input.parse::<Token![,]>()?;
+            Ok((predicate, Punctuated::parse_terminated(input)?))
+        })
+        .ok()
 }
 
 #[cfg(test)]
@@ -270,44 +254,84 @@ mod tests {
     use super::*;
 
     fn names(uses: &[&str]) -> AnnounceNames {
+        names_in(uses, parse_quote!(::coinduction))
+    }
+
+    fn names_in(uses: &[&str], coinduction: Path) -> AnnounceNames {
         let items = uses
             .iter()
-            .map(|u| syn::parse_str::<Item>(u).unwrap())
-            .collect::<Vec<_>>();
-        AnnounceNames::new(&items, &NoArgPath(parse_quote!(::coinduction)))
+            .map(|u| parse_str(u).unwrap())
+            .collect::<Vec<Item>>();
+        AnnounceNames::new(&items, &NoArgPath(coinduction))
+    }
+
+    fn item(attrs: &str) -> ItemStruct {
+        parse_str(&format!("{} struct S;", attrs)).unwrap()
     }
 
     fn announced(names: &AnnounceNames, attrs: &str) -> bool {
-        let item: ItemStruct = syn::parse_str(&format!("{} struct S;", attrs)).unwrap();
-        names.is_announced(&item.attrs)
+        names.is_announced(&item(attrs).attrs)
+    }
+
+    fn add(names: &AnnounceNames, attrs: &str) -> String {
+        let mut item = item(attrs);
+        names.add_meta(&mut item.attrs, &quote!(m));
+        let attrs = &item.attrs;
+        quote!(#(#attrs)*).to_string().replace(' ', "")
     }
 
     #[test]
-    fn attribute_paths() {
+    fn paths() {
         let n = names(&[]);
-        assert!(announced(&n, "#[announce]"));
-        assert!(announced(&n, "#[announce(macro_name = M)]"));
-        assert!(announced(&n, "#[announce::announce]"));
-        assert!(announced(&n, "#[::announce::announce]"));
-        assert!(!announced(&n, "#[my::announce]"));
-        assert!(!announced(&n, "#[a::announce::announce]"));
-        assert!(!announced(&n, "#[announce::other]"));
-    }
-
-    #[test]
-    fn derive_paths() {
-        let n = names(&[]);
-        assert!(announced(&n, "#[derive(Debug, Announce)]"));
-        assert!(announced(&n, "#[derive(announce::Announce)]"));
-        assert!(!announced(&n, "#[derive(other::Announce)]"));
-        assert!(!announced(&n, "#[derive(Debug)]"));
+        for attrs in [
+            "#[announce]",
+            "#[announce(macro_name = M)]",
+            "#[announce::announce]",
+            "#[::announce::announce]",
+            "#[derive(Debug, Announce)]",
+            "#[derive(announce::Announce)]",
+            "#[coinduction::announce::announce]",
+            "#[::coinduction::announce::announce]",
+            "#[derive(coinduction::announce::Announce)]",
+        ] {
+            assert!(announced(&n, attrs), "{}", attrs);
+        }
+        for attrs in [
+            "#[my::announce]",
+            "#[a::announce::announce]",
+            "#[announce::other]",
+            "#[other::announce::announce]",
+            "#[derive(other::Announce)]",
+            "#[derive(Debug)]",
+        ] {
+            assert!(!announced(&n, attrs), "{}", attrs);
+        }
+        // Through the `coinduction = <path>` argument
+        let n = names_in(&[], parse_quote!(crate::reexport));
+        assert!(announced(&n, "#[crate::reexport::announce::announce]"));
+        assert!(!announced(&n, "#[coinduction::announce::announce]"));
     }
 
     #[test]
     fn imports() {
-        let n = names(&["use announce::announce as ann;", "use announce::{Announce as Ann};"]);
-        assert!(announced(&n, "#[ann]"));
-        assert!(announced(&n, "#[derive(Ann)]"));
+        let n = names(&[
+            "use announce::announce as ann;",
+            "use announce::{Announce as Ann};",
+            "use coinduction::announce::{announce as a, Announce as A};",
+            "use coinduction::announce as reexport;",
+            "use reexport::Announce as D;",
+        ]);
+        for attrs in [
+            "#[ann]",
+            "#[derive(Ann)]",
+            "#[a]",
+            "#[derive(A)]",
+            "#[reexport::announce]",
+        ] {
+            assert!(announced(&n, attrs), "{}", attrs);
+        }
+        assert!(announced(&n, "#[derive(reexport::Announce)]"));
+        assert!(announced(&n, "#[derive(D)]"));
         // Imported from another crate
         let n = names(&["use my_attrs::announce;", "use other::Announce;"]);
         assert!(!announced(&n, "#[announce]"));
@@ -323,108 +347,49 @@ mod tests {
     fn cfg_attr() {
         let n = names(&[]);
         assert!(announced(&n, "#[cfg_attr(test, announce::announce)]"));
-        assert!(announced(&n, "#[cfg_attr(test, derive(announce::Announce))]"));
-        assert!(announced(&n, "#[cfg_attr(test, cfg_attr(feature = \"x\", derive(Announce)))]"));
+        assert!(announced(
+            &n,
+            "#[cfg_attr(test, derive(announce::Announce))]"
+        ));
+        assert!(announced(
+            &n,
+            "#[cfg_attr(test, cfg_attr(feature = \"x\", derive(Announce)))]"
+        ));
         assert!(!announced(&n, "#[cfg_attr(test, derive(other::Announce))]"));
-    }
-
-    fn add(attrs: &str) -> String {
-        let n = names(&[]);
-        let mut item: ItemStruct = syn::parse_str(&format!("{} struct S;", attrs)).unwrap();
-        n.add_meta(&mut item.attrs, &quote!(m));
-        let attrs = &item.attrs;
-        quote!(#(#attrs)*).to_string().replace(' ', "")
     }
 
     #[test]
     fn add_meta() {
-        assert_eq!(add("#[announce]"), "#[announce(meta=m)]");
-        assert_eq!(add("#[announce::announce(macro_name = M)]"), "#[announce::announce(macro_name=M,meta=m)]");
-        assert_eq!(add("#[derive(Announce)]"), "#[derive(Announce)]#[announce(meta=m)]");
-        assert_eq!(
-            add("#[cfg_attr(test, cfg_attr(unix, announce))]"),
-            "#[cfg_attr(test,cfg_attr(unix,announce(meta=m)))]"
-        );
-        assert_eq!(
-            add("#[cfg_attr(test, cfg_attr(unix, derive(Debug, Announce)))]"),
-            "#[cfg_attr(test,cfg_attr(unix,derive(Debug,Announce)))]#[cfg_attr(all(test,unix),announce(meta=m))]"
-        );
-    }
-}
-
-#[cfg(test)]
-mod reexport_tests {
-    use super::*;
-
-    fn names_in(uses: &[&str], coinduction: Path) -> AnnounceNames {
-        let items = uses
-            .iter()
-            .map(|u| syn::parse_str::<Item>(u).unwrap())
-            .collect::<Vec<_>>();
-        AnnounceNames::new(&items, &NoArgPath(coinduction))
-    }
-
-    fn announced(names: &AnnounceNames, attrs: &str) -> bool {
-        let item: ItemStruct = syn::parse_str(&format!("{} struct S;", attrs)).unwrap();
-        names.is_announced(&item.attrs)
-    }
-
-    fn add(names: &AnnounceNames, attrs: &str) -> String {
-        let mut item: ItemStruct = syn::parse_str(&format!("{} struct S;", attrs)).unwrap();
-        names.add_meta(&mut item.attrs, &quote!(m));
-        let attrs = &item.attrs;
-        quote!(#(#attrs)*).to_string().replace(' ', "")
-    }
-
-    #[test]
-    fn paths() {
-        let n = names_in(&[], parse_quote!(::coinduction));
-        assert!(announced(&n, "#[coinduction::announce::announce]"));
-        assert!(announced(&n, "#[::coinduction::announce::announce]"));
-        assert!(announced(&n, "#[derive(coinduction::announce::Announce)]"));
-        assert!(!announced(&n, "#[other::announce::announce]"));
-        // Through the `coinduction = <path>` argument
-        let n = names_in(&[], parse_quote!(crate::reexport));
-        assert!(announced(&n, "#[crate::reexport::announce::announce]"));
-        assert!(!announced(&n, "#[coinduction::announce::announce]"));
-    }
-
-    #[test]
-    fn imports() {
-        let n = names_in(
-            &["use coinduction::announce::{announce as a, Announce as A};"],
-            parse_quote!(::coinduction),
-        );
-        assert!(announced(&n, "#[a]"));
-        assert!(announced(&n, "#[derive(A)]"));
-        let n = names_in(&["use coinduction::announce as ann;", "use ann::Announce as D;"], parse_quote!(::coinduction));
-        assert!(announced(&n, "#[ann::announce]"));
-        assert!(announced(&n, "#[derive(ann::Announce)]"));
-        assert!(announced(&n, "#[derive(D)]"));
-    }
-
-    #[test]
-    fn krate() {
-        let n = names_in(&["use coinduction::announce::Announce as A;"], parse_quote!(::coinduction));
-        assert_eq!(
-            add(&n, "#[coinduction::announce::announce]"),
-            "#[coinduction::announce::announce(crate=::coinduction::announce,meta=m)]"
-        );
-        assert_eq!(
-            add(&n, "#[coinduction::announce::announce(crate = x)]"),
-            "#[coinduction::announce::announce(crate=x,meta=m)]"
-        );
-        assert_eq!(
-            add(&n, "#[derive(A)]"),
-            "#[derive(A)]#[announce(crate=::coinduction::announce,meta=m)]"
-        );
-        // The helper attribute of a derive through the re-export
-        assert_eq!(
-            add(&n, "#[derive(A)] #[announce(macro_name = M)]"),
-            "#[derive(A)]#[announce(macro_name=M,crate=::coinduction::announce,meta=m)]"
-        );
-        // announce from the crate's own dependency
-        assert_eq!(add(&n, "#[announce::announce]"), "#[announce::announce(meta=m)]");
-        assert_eq!(add(&n, "#[derive(announce::Announce)]"), "#[derive(announce::Announce)]#[announce(meta=m)]");
+        let n = names(&["use coinduction::announce::Announce as A;"]);
+        for (attrs, expected) in [
+            ("#[announce]", "#[announce(meta=m,)]"),
+            ("#[announce::announce]", "#[announce::announce(meta=m,)]"),
+            ("#[announce::announce(macro_name = M)]", "#[announce::announce(meta=m,macro_name=M)]"),
+            ("#[derive(Announce)]", "#[derive(Announce)]#[announce(meta=m,)]"),
+            (
+                "#[cfg_attr(test, cfg_attr(unix, announce))]",
+                "#[cfg_attr(test,cfg_attr(unix,announce(meta=m,)))]",
+            ),
+            (
+                "#[cfg_attr(test, cfg_attr(unix, derive(Debug, Announce)))]",
+                "#[cfg_attr(test,cfg_attr(unix,derive(Debug,Announce)))]#[cfg_attr(all(test,unix),announce(meta=m,))]",
+            ),
+            // Through the re-export: `crate = ..` unless given
+            (
+                "#[coinduction::announce::announce]",
+                "#[coinduction::announce::announce(crate=::coinduction::announce,meta=m,)]",
+            ),
+            (
+                "#[coinduction::announce::announce(crate = x)]",
+                "#[coinduction::announce::announce(meta=m,crate=x)]",
+            ),
+            ("#[derive(A)]", "#[derive(A)]#[announce(crate=::coinduction::announce,meta=m,)]"),
+            (
+                "#[derive(A)] #[announce(macro_name = M)]",
+                "#[derive(A)]#[announce(crate=::coinduction::announce,meta=m,macro_name=M)]",
+            ),
+        ] {
+            assert_eq!(add(&n, attrs), expected);
+        }
     }
 }

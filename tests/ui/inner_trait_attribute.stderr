@@ -1,8 +1,7 @@
-error: `#[coinduction]` is no longer applied to traits
-
-         = help: announce the trait with `#[announce::announce]`; traits announced in a `#[coinduction]` module are worked on
-
- --> tests/ui/inner_trait_attribute.rs:7:15
+error: `#[coinduction]` in a `#[coinduction]` module can only be applied to `use` items
+ --> tests/ui/inner_trait_attribute.rs:7:5
   |
-7 |     pub trait Count {
-  |               ^^^^^
+7 | /     pub trait Count {
+8 | |         fn count(&self) -> usize;
+9 | |     }
+  | |_____^

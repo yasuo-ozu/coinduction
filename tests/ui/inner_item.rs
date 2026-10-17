@@ -1,4 +1,4 @@
-// In a module, `#[coinduction]` marks only `use`, `trait`, `struct`, `enum` and `union` items.
+// In a module, `#[coinduction]` marks only `use` items.
 use coinduction::coinduction;
 
 #[coinduction]

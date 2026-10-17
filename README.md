@@ -19,8 +19,8 @@ crates) with the [`announce`](https://crates.io/crates/announce) crate:
   types that no `#[coinduction]` module describes (tuples, arrays, foreign types) go in the
   announcement: `#[announce(meta = coinduction::rules(...))]`.
 - A struct, enum or union in a `#[coinduction]` module is exported by announcing it with
-  `#[announce]`. The module adds the predicates of the type's impls to the announcement, so that
-  other `#[coinduction]` modules can see through bounds on it.
+  `#[announce]`. The module adds the predicates of the type's impls of the traits it works on to
+  the announcement, so that other `#[coinduction]` modules can see through bounds on it.
 
 `#[coinduction]` recognizes announce's attribute as `announce`, as a path from the announce crate
 (also when it is renamed in `Cargo.toml`) or from `coinduction::announce`, under a name imported

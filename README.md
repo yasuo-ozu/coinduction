@@ -22,6 +22,11 @@ crates) with the [`announce`](https://crates.io/crates/announce) crate:
   `#[announce]` or `#[derive(Announce)]`. The module adds the predicates of the type's impls to
   the announcement, so that other `#[coinduction]` modules can see through bounds on it.
 
+`#[coinduction]` recognizes announce's attribute and derive as `announce` / `Announce`, as paths
+from the announce crate (also when it is renamed in `Cargo.toml`) or from `coinduction::announce`,
+under names imported with `use announce::{announce as .., Announce as ..}`, and inside
+`#[cfg_attr(..)]`.
+
 The library enables you to define types and traits with circular dependencies that would normally be impossible in Rust's type system, making it particularly useful for recursive data structures, graph-like types, and complex generic scenarios.
 
 ## Quick Start
@@ -35,6 +40,13 @@ announce = "0.1.1"
 ```
 
 A crate that only defines traits (with their rules) depends on `announce` alone.
+
+`coinduction` re-exports announce as `coinduction::announce`, so a crate using `#[coinduction]` can
+leave out the `announce` dependency. In a `#[coinduction]` module, announcements through that path
+(`#[coinduction::announce::announce]`, `#[derive(coinduction::announce::Announce)]`, or names
+imported from there) get `crate = ::coinduction::announce`, the path announce's generated code
+uses. Outside a module, write it:
+`#[coinduction::announce::announce(crate = ::coinduction::announce)]`.
 
 ## Why Coinduction?
 

@@ -287,7 +287,10 @@ pub fn next_step(mut args: NextStepArgs) -> TokenStream {
     if let Some(Some(target)) =
         (&args.kind != &NextStepKind::None).then(|| args.working_list.pop_front())
     {
+        let rules = crate::solver::rules(&args.target_impls, |t| args.working_traits.contains(t));
         for solver in args.solvers.iter_mut().filter_map(Option::as_mut) {
+            // New constraints on types of the module, followed through the impls of the module
+            let mut module_constraints = Vec::new();
             solver.graph.scope_mut(|mut graph| {
                 let root_ix_opt = graph.node_indices().find(|ix| {
                     let node = graph.node(*ix);
@@ -389,6 +392,9 @@ pub fn next_step(mut args: NextStepArgs) -> TokenStream {
                             {
                                 args.working_list.push_back(new_constraint.clone());
                             }
+                            if trait_in_working_traits && is_ignored {
+                                module_constraints.push(new_constraint.clone());
+                            }
                         }
                         let target_ix = existing_ix_opt
                             .unwrap_or_else(|| graph.insert_node(new_constraint).unwrap());
@@ -401,6 +407,13 @@ pub fn next_step(mut args: NextStepArgs) -> TokenStream {
                     }
                 }
             });
+            for constraint in solver.expand(&module_constraints, &rules, &args.ignore_tys, |t| {
+                args.working_traits.contains(t)
+            }) {
+                if !args.working_list.contains(&constraint) {
+                    args.working_list.push_back(constraint);
+                }
+            }
         }
     }
     if let Some(target) = args.working_list.front() {

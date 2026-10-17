@@ -30,7 +30,7 @@ pub mod wrappers {
     #[coinduction]
     use super::Count;
     use coinduction::announce as ann;
-    use coinduction::announce::Announce as Derived;
+    use coinduction::announce::announce as announced;
 
     #[coinduction::announce::announce]
     pub struct ByPath<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
@@ -44,10 +44,10 @@ pub mod wrappers {
         }
     }
 
-    #[derive(Derived)]
-    pub struct DeriveImported<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
+    #[announced]
+    pub struct Imported<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
 
-    impl<T> Count for DeriveImported<T>
+    impl<T> Count for Imported<T>
     where
         T: Count,
     {

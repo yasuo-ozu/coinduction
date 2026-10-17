@@ -19,13 +19,12 @@ crates) with the [`announce`](https://crates.io/crates/announce) crate:
   types that no `#[coinduction]` module describes (tuples, arrays, foreign types) go in the
   announcement: `#[announce(meta = coinduction::rules(...))]`.
 - A struct, enum or union in a `#[coinduction]` module is exported by announcing it with
-  `#[announce]` or `#[derive(Announce)]`. The module adds the predicates of the type's impls to
-  the announcement, so that other `#[coinduction]` modules can see through bounds on it.
+  `#[announce]`. The module adds the predicates of the type's impls to the announcement, so that
+  other `#[coinduction]` modules can see through bounds on it.
 
-`#[coinduction]` recognizes announce's attribute and derive as `announce` / `Announce`, as paths
-from the announce crate (also when it is renamed in `Cargo.toml`) or from `coinduction::announce`,
-under names imported with `use announce::{announce as .., Announce as ..}`, and inside
-`#[cfg_attr(..)]`.
+`#[coinduction]` recognizes announce's attribute as `announce`, as a path from the announce crate
+(also when it is renamed in `Cargo.toml`) or from `coinduction::announce`, under a name imported
+with `use announce::announce as ..`, and inside `#[cfg_attr(..)]`.
 
 The library enables you to define types and traits with circular dependencies that would normally be impossible in Rust's type system, making it particularly useful for recursive data structures, graph-like types, and complex generic scenarios.
 
@@ -36,15 +35,14 @@ Add this to your `Cargo.toml`:
 ```toml
 [dependencies]
 coinduction = "0.2.0"
-announce = "0.1.1"
+announce = "0.2.0"
 ```
 
 A crate that only defines traits (with their rules) depends on `announce` alone.
 
 `coinduction` re-exports announce as `coinduction::announce`, so a crate using `#[coinduction]` can
 leave out the `announce` dependency. In a `#[coinduction]` module, announcements through that path
-(`#[coinduction::announce::announce]`, `#[derive(coinduction::announce::Announce)]`, or names
-imported from there) get `crate = ::coinduction::announce`, the path announce's generated code
+(`#[coinduction::announce::announce]`, or a name imported from there) get `crate = ::coinduction::announce`, the path announce's generated code
 uses. Outside a module, write it:
 `#[coinduction::announce::announce(crate = ::coinduction::announce)]`.
 

@@ -26,6 +26,14 @@ pub use coinduction_macro::coinduction;
 #[doc(hidden)]
 pub use coinduction_macro::__next_step;
 
+/// The [`announce`](https://docs.rs/announce) crate, so that a crate using `#[coinduction]` need
+/// not depend on it: `#[coinduction::announce::announce]`,
+/// `#[derive(coinduction::announce::Announce)]`. In a `#[coinduction]` module, the announcements
+/// of types through this path get `crate = ::coinduction::announce` (with the `coinduction`
+/// argument of the module); elsewhere, write it:
+/// `#[coinduction::announce::announce(crate = ::coinduction::announce)]`.
+pub use announce;
+
 #[cfg(doctest)]
 #[doc = include_str!("README.md")]
 struct ReadmeDoctests;

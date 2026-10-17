@@ -76,6 +76,7 @@ fn unwrap_type_group(typ: Type) -> Type {
     }
 }
 
+mod announce_attrs;
 mod coinduction;
 mod matching;
 mod next_step;

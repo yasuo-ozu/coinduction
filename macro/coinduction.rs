@@ -2,6 +2,7 @@ use proc_macro2::TokenStream;
 use proc_macro_error::abort;
 use safegraph::graph::Graph;
 use std::collections::{HashSet, VecDeque};
+use syn::ext::IdentExt;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::*;
@@ -145,7 +146,12 @@ fn eval_cfg_impls(module: ItemMod, args: &ModuleArgs) -> TokenStream {
     let random = crate::get_random();
     let name = |ix: usize| {
         Ident::new(
-            &format!("__coinduction_cfg_{}_{}_{}", module.ident, ix, random),
+            &format!(
+                "__coinduction_cfg_{}_{}_{}",
+                module.ident.unraw(),
+                ix,
+                random
+            ),
             proc_macro2::Span::call_site(),
         )
     };
@@ -300,9 +306,10 @@ pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
                     item,
                     "`#[coinduction]` in a `#[coinduction]` module can only be applied to `use` items"
                 ),
-                (Item::Trait(item_trait), None) => {
+                (Item::Trait(mut item_trait), None) => {
                     if announce_names.is_announced(&item_trait.attrs) {
                         marked_traits.insert(NoArgPath(item_trait.ident.clone().into()));
+                        announce_names.add_meta(&mut item_trait.attrs, None);
                     }
                     others.push(Item::Trait(item_trait));
                 }
@@ -454,7 +461,7 @@ pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
         | Item::Union(ItemUnion { attrs, ident, .. }) = item
         {
             if let Some(meta) = impls_metas.get(ident) {
-                announce_names.add_meta(attrs, meta);
+                announce_names.add_meta(attrs, Some(meta));
             }
         }
     }

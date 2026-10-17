@@ -46,6 +46,34 @@ pub mod cycle {
     }
 }
 
+// The trait announced in a module of `tests/reexport`
+#[coinduction]
+pub mod depth {
+    #[coinduction]
+    use reexport::local::Depth;
+
+    pub struct Node(pub Option<Box<Leaf>>);
+    pub struct Leaf(pub Option<Box<Node>>);
+
+    impl Depth for Node
+    where
+        Leaf: Depth,
+    {
+        fn depth(&self) -> usize {
+            self.0.as_ref().map_or(0, |n| n.depth()) + 1
+        }
+    }
+
+    impl Depth for Leaf
+    where
+        Node: Depth,
+    {
+        fn depth(&self) -> usize {
+            self.0.as_ref().map_or(0, |n| n.depth()) + 1
+        }
+    }
+}
+
 #[test]
 fn reexport() {
     use cycle::{Leaf, List, Node};
@@ -55,4 +83,13 @@ fn reexport() {
     assert_eq!(node.count(), 1 + 2 + 3);
     assert_eq!(Leaf(Some(Box::new(node))).count(), 7);
     assert_eq!(List(Some(Box::new((1, List(None))))).count(), 1);
+}
+
+#[test]
+fn trait_in_module() {
+    use depth::{Leaf, Node};
+    use reexport::local::Depth;
+    assert_eq!(Leaf(Some(Box::new(Node(None)))).depth(), 2);
+    let local = reexport::local::Leaf(Some(Box::new(reexport::local::Node(None))));
+    assert_eq!(local.depth(), 2);
 }

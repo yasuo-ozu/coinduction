@@ -178,8 +178,9 @@ impl AnnounceNames {
     /// Add `meta = <add>` to the options of the announcement of an item: to its `#[announce(...)]`
     /// attribute, or, for `#[derive(Announce)]` without one, in a new helper attribute under the
     /// same `cfg_attr`s as the derive. An announcement through the re-export also gets
-    /// `crate = <coinduction>::announce`, unless it has a `crate` option.
-    pub fn add_meta(&self, attrs: &mut Vec<Attribute>, add: &TokenStream) {
+    /// `crate = <coinduction>::announce`, unless it has a `crate` option; with no `add`, that is
+    /// the only change.
+    pub fn add_meta(&self, attrs: &mut Vec<Attribute>, add: Option<&TokenStream>) {
         let derive = attrs
             .iter()
             .find_map(|attr| self.find(&attr.meta, "Announce", Vec::new()));
@@ -187,6 +188,7 @@ impl AnnounceNames {
         if attrs
             .iter_mut()
             .any(|attr| self.add_meta_to(&mut attr.meta, add, via))
+            || add.is_none()
         {
             return;
         }
@@ -202,7 +204,12 @@ impl AnnounceNames {
 
     /// `derive`: whether the derive of the item is reached through the re-export, if it derives
     /// `Announce`; its helper attribute is `announce` under any name of the derive.
-    fn add_meta_to(&self, meta: &mut Meta, add: &TokenStream, derive: Option<bool>) -> bool {
+    fn add_meta_to(
+        &self,
+        meta: &mut Meta,
+        add: Option<&TokenStream>,
+        derive: Option<bool>,
+    ) -> bool {
         let via = match derive {
             Some(via) if meta.path().is_ident("announce") => Some(via),
             _ => self.names(meta.path(), "announce"),
@@ -228,8 +235,11 @@ impl AnnounceNames {
             .is_ok_and(|options| options.krate.is_some());
         let coinduction = &self.coinduction;
         let krate = (via && !has_krate).then(|| quote!(crate = #coinduction::announce,));
-        let path = meta.path().clone();
-        *meta = parse_quote!(#path(#krate meta = #add, #options));
+        if krate.is_some() || add.is_some() {
+            let path = meta.path().clone();
+            let add = add.map(|add| quote!(meta = #add,));
+            *meta = parse_quote!(#path(#krate #add #options));
+        }
         true
     }
 }
@@ -274,8 +284,12 @@ mod tests {
     }
 
     fn add(names: &AnnounceNames, attrs: &str) -> String {
+        add_some(names, attrs, Some(&quote!(m)))
+    }
+
+    fn add_some(names: &AnnounceNames, attrs: &str, add: Option<&TokenStream>) -> String {
         let mut item = item(attrs);
-        names.add_meta(&mut item.attrs, &quote!(m));
+        names.add_meta(&mut item.attrs, add);
         let attrs = &item.attrs;
         quote!(#(#attrs)*).to_string().replace(' ', "")
     }
@@ -390,6 +404,20 @@ mod tests {
             ),
         ] {
             assert_eq!(add(&n, attrs), expected);
+        }
+        // Without `meta`: only `crate = ..` through the re-export
+        for (attrs, expected) in [
+            ("#[announce]", "#[announce]"),
+            (
+                "#[coinduction::announce::announce]",
+                "#[coinduction::announce::announce(crate=::coinduction::announce,)]",
+            ),
+            (
+                "#[coinduction::announce::announce(crate = x)]",
+                "#[coinduction::announce::announce(crate=x)]",
+            ),
+        ] {
+            assert_eq!(add_some(&n, attrs, None), expected);
         }
     }
 }

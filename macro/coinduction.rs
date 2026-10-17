@@ -7,6 +7,7 @@ use syn::punctuated::Punctuated;
 use syn::*;
 use template_quote::quote;
 
+use crate::announce_attrs::AnnounceNames;
 use crate::matching::Matching;
 use crate::next_step::{next_step, NextStepArgs};
 use crate::solver::{Constraint, Solver};
@@ -30,56 +31,6 @@ fn take_coinduction_attr(attrs: &mut Vec<Attribute>) -> Option<Attribute> {
         abort!(dup, "duplicate `#[coinduction]` attribute");
     }
     Some(attr)
-}
-
-/// Whether `attr` is `#[announce]` / `#[announce(...)]` (also with a path, as
-/// `#[announce::announce]`): the attribute, or the helper attribute of `#[derive(Announce)]`.
-fn is_announce_attr(attr: &Attribute) -> bool {
-    attr.path()
-        .segments
-        .last()
-        .map_or(false, |seg| seg.ident == "announce")
-}
-
-/// Whether the item is announced: it has `#[announce]`, or derives `Announce`.
-fn is_announced(attrs: &[Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        is_announce_attr(attr)
-            || (attr.path().is_ident("derive")
-                && attr
-                    .parse_args_with(Punctuated::<Path, Token![,]>::parse_terminated)
-                    .map_or(false, |paths| {
-                        paths.iter().any(|path| {
-                            path.segments
-                                .last()
-                                .map_or(false, |seg| seg.ident == "Announce")
-                        })
-                    }))
-    })
-}
-
-/// Add `meta = <meta>` to the options of the announcement of an item: to its `#[announce(...)]`
-/// attribute, or, for `#[derive(Announce)]` without one, in a new helper attribute.
-fn add_announce_meta(attrs: &mut Vec<Attribute>, meta: &TokenStream) {
-    let Some(attr) = attrs.iter_mut().find(|attr| is_announce_attr(attr)) else {
-        attrs.push(parse_quote!(#[announce(meta = #meta)]));
-        return;
-    };
-    let path = attr.path().clone();
-    let options = match &attr.meta {
-        Meta::Path(_) => TokenStream::new(),
-        Meta::List(list) => {
-            let mut options = list.tokens.clone();
-            if !options.is_empty()
-                && !matches!(options.clone().into_iter().last(), Some(proc_macro2::TokenTree::Punct(p)) if p.as_char() == ',')
-            {
-                options.extend(quote!(,));
-            }
-            options
-        }
-        Meta::NameValue(_) => abort!(attr, "expected `#[announce]` or `#[announce(...)]`"),
-    };
-    attr.meta = parse_quote!(#path(#options meta = #meta));
 }
 
 /// Collect the names that a `use` item imports under another name (`alias -> original`), and the
@@ -300,6 +251,8 @@ pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
         }
     }
     trait_aliases.retain(|(alias, _)| !imported_names.contains(alias));
+    let announce_names =
+        AnnounceNames::new(module.content.as_ref().map_or(&[][..], |c| &c.1), &args.coinduction);
     let (target_impls, mut other_contents): (Vec<ItemImpl>, Vec<Item>) = module
         .content
         .as_ref()
@@ -348,7 +301,7 @@ pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
                     "`#[coinduction]` in a `#[coinduction]` module can only be applied to `use` items"
                 ),
                 (Item::Trait(item_trait), None) => {
-                    if is_announced(&item_trait.attrs) {
+                    if announce_names.is_announced(&item_trait.attrs) {
                         marked_traits.insert(NoArgPath(item_trait.ident.clone().into()));
                     }
                     others.push(Item::Trait(item_trait));
@@ -363,7 +316,7 @@ pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
                     else {
                         unreachable!()
                     };
-                    if is_announced(attrs) {
+                    if announce_names.is_announced(attrs) {
                         announced_types.push(ident.clone());
                     }
                     others.push(item);
@@ -501,7 +454,7 @@ pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
         | Item::Union(ItemUnion { attrs, ident, .. }) = item
         {
             if let Some(meta) = impls_metas.get(ident) {
-                add_announce_meta(attrs, meta);
+                announce_names.add_meta(attrs, meta);
             }
         }
     }

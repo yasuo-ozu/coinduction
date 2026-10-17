@@ -1,0 +1,13 @@
+[package]
+name = "renamed"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# announce under another name: `#[coinduction]` recognizes `ann::announce` and `ann::Announce`
+[dependencies]
+ann = { package = "announce", version = "0.1.1" }
+coinduction = { path = "../.." }
+
+[lib]
+path = "lib.rs"

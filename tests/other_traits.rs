@@ -187,6 +187,32 @@ pub mod aliased {
     }
 }
 
+// The rules of `LocalTrait` name `::core::clone::Clone`, which is not the module's working trait
+// `Clone` although it has the same name: the module marks no traits, so its impl of `Clone` makes
+// that one
+#[coinduction]
+pub mod std_trait {
+    use traitdef::LocalTrait;
+
+    #[derive(Default)]
+    pub struct Node(pub Option<Box<(u8, Node)>>);
+
+    impl Clone for Node {
+        fn clone(&self) -> Self {
+            Node(self.0.clone())
+        }
+    }
+
+    impl LocalTrait for Node
+    where
+        (u8, Node): LocalTrait,
+    {
+        fn local_method(&self) -> usize {
+            self.0.as_ref().map_or(0, |pair| pair.local_method()) + 1
+        }
+    }
+}
+
 use traits::{Size, Weight};
 
 #[test]
@@ -219,4 +245,12 @@ fn aliased() {
     use wrappers::Tagged;
     assert_eq!(List(Some(Box::new((List(None), List(None))))).size(), 12);
     assert_eq!(Node(Tagged(Some(Box::new(Node(Tagged(None)))))).size(), 22);
+}
+
+#[test]
+fn std_trait() {
+    use std_trait::Node;
+    use traitdef::LocalTrait;
+    let node = Node(Some(Box::new((1, Node(None)))));
+    assert_eq!(node.local_method(), 3);
 }

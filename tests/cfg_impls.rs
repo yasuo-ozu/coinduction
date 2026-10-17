@@ -160,6 +160,35 @@ pub mod local {
     }
 }
 
+// A raw module name: the macros evaluating the `cfg`s are named after the module
+#[coinduction]
+pub mod r#type {
+    #[coinduction]
+    use super::Count;
+
+    pub struct Node(pub Option<Box<Leaf>>);
+    pub struct Leaf(pub Option<Box<Node>>);
+
+    impl Count for Node
+    where
+        Leaf: Count,
+    {
+        fn count(&self) -> usize {
+            self.0.as_ref().map_or(0, |n| n.count()) + 1
+        }
+    }
+
+    #[cfg(not(any()))]
+    impl Count for Leaf
+    where
+        Node: Count,
+    {
+        fn count(&self) -> usize {
+            self.0.as_ref().map_or(0, |n| n.count()) + 1
+        }
+    }
+}
+
 // A disabled impl of a type announced in another crate
 #[coinduction]
 pub mod cross_crate {
@@ -186,6 +215,12 @@ fn cross_crate_disabled_impl() {
     use typedef::generic_types::Chain;
     let link = Link(Chain(Some(Box::new(Link(Chain(None))))));
     assert_eq!(link.local_method(), 4);
+}
+
+#[test]
+fn raw_module_name() {
+    let leaf = r#type::Leaf(Some(Box::new(r#type::Node(None))));
+    assert_eq!(leaf.count(), 2);
 }
 
 #[test]

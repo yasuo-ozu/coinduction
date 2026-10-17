@@ -1,0 +1,7 @@
+error: `#[coinduction]` can only be applied to a `mod`
+ --> tests/ui/trait_attribute.rs:5:1
+  |
+5 | / pub trait Count {
+6 | |     fn count(&self) -> usize;
+7 | | }
+  | |_^

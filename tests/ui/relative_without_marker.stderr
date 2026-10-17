@@ -1,8 +1,0 @@
-error: no macro is generated for `S`: its impls use relative paths
-
-         = help: specify `marker = <path>` on the module, or use absolute paths
-
-  --> tests/ui/relative_without_marker.rs:17:32
-   |
-17 |     #[coinduction(macro_name = SMacro)]
-   |                                ^^^^^^

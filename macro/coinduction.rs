@@ -1,14 +1,16 @@
 use proc_macro2::TokenStream;
 use proc_macro_error::abort;
 use safegraph::graph::Graph;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
+use syn::ext::IdentExt;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::*;
 use template_quote::quote;
 
+use crate::announce_attrs::AnnounceNames;
 use crate::matching::Matching;
-use crate::next_step::{next_step, NextStepArgs, NextStepKind};
+use crate::next_step::{next_step, NextStepArgs};
 use crate::solver::{Constraint, Solver};
 use crate::{remove_path_args, NoArgPath};
 
@@ -32,36 +34,21 @@ fn take_coinduction_attr(attrs: &mut Vec<Attribute>) -> Option<Attribute> {
     Some(attr)
 }
 
-/// Parse the arguments of an inner `#[coinduction]` / `#[coinduction(...)]` attribute.
-fn parse_attr_args<T: Parse>(attr: &Attribute) -> T {
-    match &attr.meta {
-        Meta::Path(_) => parse2(TokenStream::new()),
-        Meta::List(_) => attr.parse_args(),
-        Meta::NameValue(_) => abort!(attr, "expected `#[coinduction]` or `#[coinduction(...)]`"),
-    }
-    .unwrap_or_else(|e| abort!(e.span(), "{}", e))
-}
-
-/// Arguments of `#[coinduction(...)]` on a struct, enum or union in a module: `macro_name = <ident>`.
-struct TypeArgs {
-    macro_name: Option<Ident>,
-}
-
-impl Parse for TypeArgs {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let mut macro_name = None;
-        if !input.is_empty() {
-            input.parse::<crate::kw::macro_name>()?;
-            input.parse::<Token![=]>()?;
-            macro_name = Some(input.parse()?);
-            if !input.is_empty() {
-                input.parse::<Token![,]>()?;
+/// Collect the names that a `use` item imports under another name (`alias -> original`), and the
+/// names it imports as they are.
+fn collect_use_aliases(tree: &UseTree, aliases: &mut Vec<(Ident, Ident)>, names: &mut Vec<Ident>) {
+    match tree {
+        UseTree::Path(UsePath { tree, .. }) => collect_use_aliases(tree, aliases, names),
+        UseTree::Name(UseName { ident }) => names.push(ident.clone()),
+        UseTree::Rename(UseRename { ident, rename, .. }) if rename != "_" && ident != "self" => {
+            aliases.push((rename.clone(), ident.clone()));
+        }
+        UseTree::Group(UseGroup { items, .. }) => {
+            for tree in items {
+                collect_use_aliases(tree, aliases, names);
             }
         }
-        if !input.is_empty() {
-            return Err(input.error("expected `macro_name = <ident>`"));
-        }
-        Ok(TypeArgs { macro_name })
+        _ => {}
     }
 }
 
@@ -110,29 +97,29 @@ mod kw {
     syn::custom_keyword!(coinduction);
 }
 
-/// Arguments of `#[coinduction(...)]` on a module: `marker = <path>` and `coinduction = <path>`.
+/// Arguments of `#[coinduction(...)]` on a module: `coinduction = <path>`.
 pub struct ModuleArgs {
     coinduction: NoArgPath,
-    marker: Option<Path>,
 }
 
 impl Parse for ModuleArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut coinduction = None;
-        let mut marker = None;
         while !input.is_empty() {
-            if input.peek(kw::marker) && input.peek2(Token![=]) && marker.is_none() {
-                input.parse::<kw::marker>()?;
-                input.parse::<Token![=]>()?;
-                marker = Some(input.parse()?);
-            } else if input.peek(kw::coinduction) && input.peek2(Token![=]) && coinduction.is_none()
-            {
+            if input.peek(kw::coinduction) && input.peek2(Token![=]) {
+                if coinduction.is_some() {
+                    return Err(input.error("duplicate `coinduction` argument"));
+                }
                 input.parse::<kw::coinduction>()?;
                 input.parse::<Token![=]>()?;
                 coinduction = Some(input.parse()?);
+            } else if input.peek(kw::marker) {
+                return Err(input.error(
+                    "`marker` is no longer needed: the impls of announced types are announced as written",
+                ));
             } else {
                 return Err(input.error(
-                    "expected `marker = <path>` or `coinduction = <path>`; mark traits with `#[coinduction] use ...;` or `#[coinduction] trait ...` inside the module",
+                    "expected `coinduction = <path>`; mark traits with `#[coinduction] use ...;` inside the module, or announce them there with `#[announce] trait ...`",
                 ));
             }
             if !input.is_empty() {
@@ -141,17 +128,141 @@ impl Parse for ModuleArgs {
         }
         Ok(ModuleArgs {
             coinduction: coinduction.unwrap_or_else(|| NoArgPath(parse_quote!(::coinduction))),
-            marker,
         })
     }
 }
 
+/// Whether `attrs` has a `#[cfg(...)]` attribute.
+fn has_cfg(attrs: &[Attribute]) -> bool {
+    attrs.iter().any(|attr| attr.path().is_ident("cfg"))
+}
+
+/// Evaluate the `#[cfg(...)]` attributes of the impls in `module`, and apply `#[coinduction]`
+/// again to the module with the impls that exist. An attribute macro sees the impls that a `cfg`
+/// removes, and they would take part in the resolution and the announced impls.
+///
+/// The `cfg`s are evaluated by a chain of `macro_rules!`, one for each conditional impl: the
+/// definition under `#[cfg(P)]` adds the impl to the list it passes on, and the one under
+/// `#[cfg(not(P))]` drops it. The last one emits the module. The items are passed as input, so
+/// that `$` in them is not read by the chain.
+fn eval_cfg_impls(module: ItemMod, args: &ModuleArgs) -> TokenStream {
+    let random = crate::get_random();
+    let name = |ix: usize| {
+        Ident::new(
+            &format!(
+                "__coinduction_cfg_{}_{}_{}",
+                module.ident.unraw(),
+                ix,
+                random
+            ),
+            proc_macro2::Span::call_site(),
+        )
+    };
+    let (inner_attrs, outer_attrs): (Vec<_>, Vec<_>) = module
+        .attrs
+        .iter()
+        .partition(|attr| matches!(attr.style, AttrStyle::Inner(_)));
+    let (conditional, items): (Vec<_>, Vec<_>) = module
+        .content
+        .as_ref()
+        .map_or(&[][..], |(_, items)| items)
+        .iter()
+        .cloned()
+        .partition(|item| matches!(item, Item::Impl(item_impl) if has_cfg(&item_impl.attrs)));
+    let conditional = conditional
+        .into_iter()
+        .map(|item| {
+            let Item::Impl(mut item_impl) = item else {
+                unreachable!()
+            };
+            let (cfgs, attrs) = item_impl
+                .attrs
+                .into_iter()
+                .partition::<Vec<_>, _>(|attr| attr.path().is_ident("cfg"));
+            item_impl.attrs = attrs;
+            let cfgs = cfgs
+                .iter()
+                .map(|attr| {
+                    attr.meta
+                        .require_list()
+                        .map(|list| list.tokens.clone())
+                        .unwrap_or_else(|e| abort!(e.span(), "{}", e))
+                })
+                .collect::<Vec<_>>();
+            (quote!(all(#(#cfgs),*)), item_impl)
+        })
+        .collect::<Vec<_>>();
+    let coinduction = &args.coinduction;
+    let last = name(conditional.len());
+    quote! {
+        #(for (ix, (cfg, _)) in conditional.iter().enumerate()) {
+            #[cfg(#cfg)]
+            macro_rules! #{name(ix)} {
+                (
+                    [$($__coinduction_impls:tt)*] {$($__coinduction_items:tt)*}
+                    {$($__coinduction_impl:tt)*} $($__coinduction_rest:tt)*
+                ) => {
+                    #{name(ix + 1)}! {
+                        [$($__coinduction_impls)* $($__coinduction_impl)*]
+                        {$($__coinduction_items)*} $($__coinduction_rest)*
+                    }
+                };
+            }
+            #[cfg(not(#cfg))]
+            macro_rules! #{name(ix)} {
+                (
+                    [$($__coinduction_impls:tt)*] {$($__coinduction_items:tt)*}
+                    {$($__coinduction_impl:tt)*} $($__coinduction_rest:tt)*
+                ) => {
+                    #{name(ix + 1)}! {
+                        [$($__coinduction_impls)*] {$($__coinduction_items)*} $($__coinduction_rest)*
+                    }
+                };
+            }
+        }
+        macro_rules! #last {
+            ([$($__coinduction_impls:tt)*] {$($__coinduction_items:tt)*}) => {
+                #[#coinduction::coinduction(coinduction = #coinduction)]
+                #(#outer_attrs)*
+                #{&module.vis} #{&module.unsafety} #{&module.mod_token} #{&module.ident} {
+                    $($__coinduction_items)*
+                    $($__coinduction_impls)*
+                }
+            };
+        }
+        #{name(0)}! {
+            [] { #(#inner_attrs)* #(#items)* }
+            #(for (_, item_impl) in &conditional) { {#item_impl} }
+        }
+    }
+}
+
 pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
-    // Traits marked with `#[coinduction] use ...;` or `#[coinduction] trait ...` in the module
+    if module.content.as_ref().is_some_and(|(_, items)| {
+        items
+            .iter()
+            .any(|item| matches!(item, Item::Impl(item_impl) if has_cfg(&item_impl.attrs)))
+    }) {
+        return eval_cfg_impls(module, &args);
+    }
+    // Traits marked with `#[coinduction] use ...;` or announced in the module
     let mut marked_traits = HashSet::new();
-    // Custom names for the macros of the types, given by `#[coinduction(macro_name = ...)]`
-    let mut macro_names = HashMap::new();
-    let (target_impls, other_contents): (Vec<ItemImpl>, Vec<TokenStream>) = module
+    // Types announced in the module: their announcements carry the predicates of their impls
+    let mut announced_types = Vec::new();
+    // Names imported under another name, to compare traits by their own names. A name that is
+    // also imported as it is, as in `use path::{Count, CountMacro as Count};` for a trait whose
+    // trampoline is renamed, names that item.
+    let mut trait_aliases = Vec::new();
+    let mut imported_names = Vec::new();
+    for item in module.content.as_ref().map_or(&[][..], |c| &c.1) {
+        if let Item::Use(item_use) = item {
+            collect_use_aliases(&item_use.tree, &mut trait_aliases, &mut imported_names);
+        }
+    }
+    trait_aliases.retain(|(alias, _)| !imported_names.contains(alias));
+    let announce_names =
+        AnnounceNames::new(module.content.as_ref().map_or(&[][..], |c| &c.1), &args.coinduction);
+    let (target_impls, mut other_contents): (Vec<ItemImpl>, Vec<Item>) = module
         .content
         .as_ref()
         .map(|c| &c.1)
@@ -190,32 +301,37 @@ pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
                         segments: Punctuated::new(),
                     };
                     collect_use_traits(&item_use.tree, &mut prefix, &mut marked_traits);
-                    others.push(quote!(#[allow(unused_imports)] #item_use));
-                }
-                (Item::Trait(item_trait), Some(attr)) => {
-                    marked_traits.insert(NoArgPath(item_trait.ident.clone().into()));
-                    others.push(crate::traitdef::traitdef(item_trait, parse_attr_args(&attr)));
-                }
-                (
-                    item @ (Item::Struct(_) | Item::Enum(_) | Item::Union(_)),
-                    Some(attr),
-                ) => {
-                    if let Some(macro_name) = parse_attr_args::<TypeArgs>(&attr).macro_name {
-                        let (Item::Struct(ItemStruct { ident, .. })
-                        | Item::Enum(ItemEnum { ident, .. })
-                        | Item::Union(ItemUnion { ident, .. })) = &item
-                        else {
-                            unreachable!()
-                        };
-                        macro_names.insert(ident.clone(), macro_name);
-                    }
-                    others.push(quote!(#item));
+                    let mut item_use = item_use;
+                    item_use.attrs.push(parse_quote!(#[allow(unused_imports)]));
+                    others.push(Item::Use(item_use));
                 }
                 (item, Some(_)) => abort!(
                     item,
-                    "`#[coinduction]` in a `#[coinduction]` module can only be applied to `use`, `trait`, `struct`, `enum` or `union` items"
+                    "`#[coinduction]` in a `#[coinduction]` module can only be applied to `use` items"
                 ),
-                (item, None) => others.push(quote!(#item)),
+                (Item::Trait(mut item_trait), None) => {
+                    if announce_names.is_announced(&item_trait.attrs) {
+                        marked_traits.insert(NoArgPath(item_trait.ident.clone().into()));
+                        announce_names.add_meta(&mut item_trait.attrs, None);
+                    }
+                    others.push(Item::Trait(item_trait));
+                }
+                (
+                    item @ (Item::Struct(_) | Item::Enum(_) | Item::Union(_)),
+                    None,
+                ) => {
+                    let (Item::Struct(ItemStruct { attrs, ident, .. })
+                    | Item::Enum(ItemEnum { attrs, ident, .. })
+                    | Item::Union(ItemUnion { attrs, ident, .. })) = &item
+                    else {
+                        unreachable!()
+                    };
+                    if announce_names.is_announced(attrs) {
+                        announced_types.push(ident.clone());
+                    }
+                    others.push(item);
+                }
+                (item, None) => others.push(item),
             }
             (impls, others)
         });
@@ -336,32 +452,45 @@ pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
             Some(solver)
         })
         .collect();
-    let type_macros = crate::typedef::type_macros(
+    let impls_metas = crate::typedef::type_impls(
         module.content.as_ref().map_or(&[][..], |c| &c.1),
         &working_traits,
-        &macro_names,
-        args.marker.as_ref(),
-        &args.coinduction,
+        &announced_types,
+        &trait_aliases,
     );
+    for item in other_contents.iter_mut() {
+        if let Item::Struct(ItemStruct { attrs, ident, .. })
+        | Item::Enum(ItemEnum { attrs, ident, .. })
+        | Item::Union(ItemUnion { attrs, ident, .. }) = item
+        {
+            if let Some(meta) = impls_metas.get(ident) {
+                announce_names.add_meta(attrs, Some(meta));
+            }
+        }
+    }
     let next_step_args = NextStepArgs {
-        kind: NextStepKind::None,
         working_list: working_list.into_iter().collect(),
         coinduction: args.coinduction.clone(),
         working_traits: working_traits.into_iter().collect(),
+        trait_aliases,
         ignore_tys,
         solvers,
         target_impls,
     };
     let next = next_step(next_step_args);
     quote! {
-        #(for attr in &module.attrs) {#attr}
+        #(for attr in &module.attrs) {
+            #(if matches!(attr.style, AttrStyle::Outer)) { #attr }
+        }
         #{ &module.vis }
         #{ &module.unsafety }
         #{ &module.mod_token }
         #{ &module.ident } {
+            #(for attr in &module.attrs) {
+                #(if matches!(attr.style, AttrStyle::Inner(_))) { #attr }
+            }
             #(for content in other_contents) { #content }
             #next
-            #type_macros
         }
     }
 }

@@ -4,7 +4,7 @@ mod reexport {
     pub use ::coinduction::*;
 }
 
-#[::coinduction::coinduction]
+#[announce::announce]
 pub trait Count {
     fn count(&self) -> usize;
 }
@@ -14,7 +14,8 @@ pub mod defs {
     #[coinduction]
     use super::Count;
 
-    pub struct W<T>(pub Option<Box<T>>);
+    #[announce::announce]
+    pub struct W<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
 
     impl<T> Count for W<T>
     where
@@ -24,10 +25,19 @@ pub mod defs {
             self.0.as_ref().map_or(0, |t| t.count()) + 1
         }
     }
+
+    // `#[coinduction]` is applied again after the `cfg`s, through `crate::reexport`
+    #[cfg(any())]
+    impl<T> Count for W<T> {
+        fn count(&self) -> usize {
+            0
+        }
+    }
 }
 
 #[::coinduction::coinduction(coinduction = crate::reexport)]
 pub mod user {
+    #![allow(dead_code)]
     use super::defs::W;
     #[coinduction]
     use super::Count;

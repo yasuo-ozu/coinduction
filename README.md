@@ -10,8 +10,8 @@ Attribute macros for defining circular type references and recursive trait imple
 
 Coinduction is a Rust library that provides a single attribute macro, **`#[coinduction]`**, for working with circular type dependencies and mutually recursive trait implementations:
 
-- On a **module**, it breaks circular trait dependencies between the impls in the module, and exports the impls of its types so that other `#[coinduction]` modules can see through bounds on them
-- On a **trait**, it makes the trait usable from `#[coinduction]` modules
+- On a **module**, it breaks circular trait dependencies between the impls in the module, and exports the impls of its types announced with [`announce`](https://crates.io/crates/announce) so that other `#[coinduction]` modules can see through bounds on them
+- A trait is made usable from `#[coinduction]` modules by announcing it with `#[announce]`
 
 The library enables you to define types and traits with circular dependencies that would normally be impossible in Rust's type system, making it particularly useful for recursive data structures, graph-like types, and complex generic scenarios.
 
@@ -23,7 +23,10 @@ Add this to your `Cargo.toml`:
 ```toml
 [dependencies]
 coinduction = "0.1.0"
+announce = "0.2.0"
 ```
+
+`coinduction` also re-exports announce as `coinduction::announce`.
 
 ## Why Coinduction?
 
@@ -82,8 +85,9 @@ The `#[coinduction]` macro solves this by breaking the circular dependency cycle
 This example shows how to break circular trait dependencies using `#[coinduction]` with a simple calculator:
 
 ```rust
+# use announce::announce;
 # use coinduction::*;
-#[coinduction]
+#[announce]
 trait Evaluate {
     fn evaluate(&self, input: &[&'static str], index: &mut usize) -> i32;
 }
@@ -141,13 +145,13 @@ fn main() {
 ```
 
 The traits to work on are marked inside the module, either by importing them with
-`#[coinduction] use ...;` or by defining them in the module with `#[coinduction] trait ...`:
+`#[coinduction] use ...;` or by announcing them in the module with `#[announce] trait ...`:
 
 ```rust
 # use coinduction::*;
 #[coinduction]
 mod calculator {
-    #[coinduction]
+    #[announce::announce]
     pub trait Evaluate {
         fn evaluate(&self, input: &[&'static str], index: &mut usize) -> i32;
     }
@@ -160,6 +164,7 @@ mod calculator {
         Term: Evaluate,
     {
         // ...
+#        fn evaluate(&self, input: &[&'static str], index: &mut usize) -> i32 { 0 }
     }
 
     impl Evaluate for Term
@@ -167,137 +172,88 @@ mod calculator {
         Expr: Evaluate,
     {
         // ...
+#        fn evaluate(&self, input: &[&'static str], index: &mut usize) -> i32 { 0 }
     }
 }
+# fn main() {}
 ```
 
 If no trait is marked, every trait implemented in the module is used.
 
 ### Circular Dependencies Across Modules
 
-Types defined in a `#[coinduction]` module can be used in the bounds of another `#[coinduction]` module:
+A type announced in a `#[coinduction]` module can be used in the bounds of another `#[coinduction]` module:
 
 ```rust
+# use announce::announce;
 # use coinduction::*;
-# use std::marker::PhantomData;
-
-#[coinduction]
-trait ProcessData {
-    fn process(&self) -> String;
+#[announce]
+pub trait Count {
+    fn count(&self) -> usize;
 }
 
-// First define generic types in a #[coinduction] module
 #[coinduction]
-mod data_types {
-    # use std::marker::PhantomData;
-    trait ProcessData {
-        fn process(&self) -> String;
-    }
+pub mod wrappers {
+    #[coinduction]
+    use super::Count;
+    use announce::announce;
 
-    pub struct DataStruct<T> {
-        pub value: String,
-        pub phantom: PhantomData<T>,
-    }
+    #[announce]
+    pub struct Boxed<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
 
-    // ProcessData impl for DataStruct when T: ProcessData
-    impl<T> ProcessData for DataStruct<T>
+    impl<T> Count for Boxed<T>
     where
-        T: ProcessData,
+        T: Count,
     {
-        fn process(&self) -> String {
-            format!("DataStruct({})", self.value)
+        fn count(&self) -> usize {
+            self.0.as_ref().map_or(0, |t| t.count()) + 1
         }
     }
 }
 
-// Then use #[coinduction] to implement cyclic induction with T position circularity
 #[coinduction]
-mod circular_impls {
-    # use std::marker::PhantomData;
-    trait ProcessData {
-        fn process(&self) -> String;
-    }
-    
-    pub struct DataStruct<T> {
-        pub value: String,
-        pub phantom: PhantomData<T>,
-    }
+pub mod tree {
+    use super::wrappers::Boxed;
+    #[coinduction]
+    use super::Count;
 
-    // Cyclic induction with constraints using DataStruct<T>
-    // where the circular dependency occurs in the T position
-    pub struct CyclicA<T> {
-        pub data: DataStruct<T>,
-    }
-    
-    pub struct CyclicB<T> {
-        pub value: String,
-        pub phantom: PhantomData<T>,
-    }
+    pub struct Node(pub Boxed<Leaf>);
+    pub struct Leaf(pub Option<Box<Node>>);
 
-    // CyclicA implementation with circular dependency in T position
-    impl<T> ProcessData for CyclicA<T>
+    // Node -> Boxed<Leaf> -> Leaf -> Node
+    impl Count for Node
     where
-        T: Clone,
-        DataStruct<CyclicB<T>>: ProcessData,  // Circular dependency in T position
+        Boxed<Leaf>: Count,
     {
-        fn process(&self) -> String {
-            format!("CyclicA with DataStruct: {}", self.data.value)
+        fn count(&self) -> usize {
+            self.0.count() + 1
         }
     }
 
-    // CyclicB implementation with circular dependency in T position  
-    impl<T> ProcessData for CyclicB<T>
+    impl Count for Leaf
     where
-        T: Clone,
-        DataStruct<CyclicA<T>>: ProcessData,  // Circular dependency in T position
+        Node: Count,
     {
-        fn process(&self) -> String {
-            format!("CyclicB: {}", self.value)
-        }
-    }
-
-    // Base implementation for simple types to break the infinite recursion
-    impl ProcessData for String {
-        fn process(&self) -> String {
-            format!("String: {}", self)
+        fn count(&self) -> usize {
+            self.0.as_ref().map_or(0, |n| n.count()) + 1
         }
     }
 }
-
-// Example usage:
-// Test with simple type
-let data = data_types::DataStruct::<String> {
-    value: "hello".to_string(),
-    phantom: PhantomData,
-};
-
-// Test cyclic structures using the coinduction module  
-let cyclic_a = circular_impls::CyclicA {
-    data: circular_impls::DataStruct::<String> {
-        value: "cyclic".to_string(),
-        phantom: PhantomData,
-    },
-};
-
-let cyclic_b = circular_impls::CyclicB::<String> {
-    value: "test".to_string(),
-    phantom: PhantomData,
-};
-// Note: This demonstrates cyclic induction with DataStruct<T> in T position
+# fn main() {}
 ```
+
+Announced items are used in other crates, so they need paths that resolve there, such as
+`::core::option::Option` (see the [`announce` documentation](https://docs.rs/announce)).
 
 ## Attribute Arguments
 
-- **Module**: `#[coinduction(marker = path, coinduction = path)]`
-  - `marker`: a type used to refer to relative paths in the impls exported to other modules. Without it, types whose impls use relative paths are not exported
+- **Module**: `#[coinduction(coinduction = path)]`
   - `coinduction`: override the path used to refer to this crate (default `::coinduction`)
-- **Trait**: `#[coinduction((pattern) => { predicates }, ..., macro_name = ident)]`
-  - each rule gives the predicates of the impls of the trait for types matching `pattern`, e.g. `#[coinduction((($t1: ty, $t2: ty)) => { $t1: TraitA, $t2: TraitB })]`
-  - `macro_name`: the name the macro generated for the trait is exported as (default: the trait name)
+- **Trait**: `#[announce(meta = coinduction::rules((pattern) => { predicates }, ...))]`
+  - each rule gives the predicates of the impls of the trait for types matching `pattern`, e.g. `#[announce(meta = coinduction::rules((($t1: ty, $t2: ty)) => { $t1: TraitA, $t2: TraitB }))]`
 - **Inside a module**:
   - `#[coinduction] use ...;` takes no arguments
-  - `#[coinduction(...)] trait` takes the same arguments as a trait outside a module
-  - `#[coinduction(macro_name = ident)]` on a `struct`, `enum` or `union`: the name the macro generated for the type is exported as (default: the type name)
+  - `#[announce(macro_name = ident)]` on a trait or type: the name the macro generated for it is exported as (default: the trait or type name)
 
   `#[coinduction]` modules look up these macros by the trait or type name, so when a macro is
   renamed, import it under that name where the trait or type is used, e.g.

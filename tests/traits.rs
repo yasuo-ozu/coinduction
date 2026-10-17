@@ -3,13 +3,13 @@
 use coinduction::coinduction;
 use traits::Size;
 
-// A trait with rules, defined in a module
+// A trait with rules, announced in a module
 #[coinduction]
 pub mod traits {
-    #[coinduction(
+    #[announce::announce(meta = coinduction::rules(
         (($T:ty, $U:ty)) => { $T: Size, $U: Size },
         (u8) => {}
-    )]
+    ))]
     pub trait Size {
         fn size(&self) -> usize;
     }

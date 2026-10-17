@@ -1,0 +1,5 @@
+error: duplicate `coinduction` argument
+ --> tests/ui/duplicate_module_argument.rs:4:44
+  |
+4 | #[coinduction(coinduction = ::coinduction, coinduction = ::coinduction)]
+  |                                            ^^^^^^^^^^^

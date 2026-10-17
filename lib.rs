@@ -1,28 +1,38 @@
-/// Attribute macro for breaking circular trait dependencies.
+/// Attribute macro for breaking circular trait dependencies, applied to a `mod`.
 ///
-/// - On a `mod`, it rewrites the impls of the module so that mutually recursive `where` bounds
-///   resolve, and exports the predicates of the impls on local types so that other
-///   `#[coinduction]` modules can see through bounds on them. The traits to work on are marked
-///   inside the module with `#[coinduction] use path::{TraitA, TraitB};` or
-///   `#[coinduction] trait TraitC { ... }`; if none are marked, every trait implemented in the
-///   module is used. Accepted arguments are `marker = <path>` (a type used to refer to relative
-///   paths in exported impls) and `coinduction = <path>` (the path to this crate).
-/// - On a `trait`, it makes the trait usable from `#[coinduction]` modules. Arguments of the form
-///   `(<pattern>) => { <predicates> }` give the predicates of impls of the trait for types
-///   matching `<pattern>`, and `macro_name = <ident>` renames the macro generated for the trait
-///   (by default, the trait name).
-/// - On a `struct`, `enum` or `union` in a `#[coinduction]` module, `macro_name = <ident>` renames
-///   the macro generated for the type (by default, the type name).
+/// It rewrites the impls of the module so that mutually recursive `where` bounds resolve. The
+/// traits to work on are marked inside the module with `#[coinduction] use path::{TraitA, TraitB};`
+/// or by announcing them there (`#[announce] trait TraitC { ... }`); if none are marked, every
+/// trait implemented in the module is used. The only argument is `coinduction = <path>` (the path
+/// to this crate).
 ///
-/// `#[coinduction]` modules look up these macros by the trait or type name, so a renamed macro
-/// must be imported under that name where the trait or type is used.
+/// Traits and types are read from other modules and crates through their
+/// [`announce`](https://docs.rs/announce) trampolines:
+///
+/// - A trait that `#[coinduction]` modules work on must be announced, with `#[announce]`. Rules
+///   for the impls of the trait on types that no `#[coinduction]` module describes (tuples, arrays,
+///   foreign types) are given as `META`:
+///   `#[announce(meta = coinduction::rules((<pattern>) => { <predicates> }, ...))]`, where
+///   `<pattern>` is a `macro_rules!` pattern matched against the type.
+/// - A struct, enum or union in a `#[coinduction]` module that is announced, with `#[announce]`,
+///   carries the predicates of its impls of the traits the module works on in its announcement, so
+///   that other `#[coinduction]` modules can see through bounds on it.
+///
+/// `#[coinduction]` modules look up the trampolines by the trait or type name, so a trampoline
+/// renamed with `#[announce(macro_name = ...)]` must be imported under that name where the trait
+/// or type is used.
 pub use coinduction_macro::coinduction;
 
 #[doc(hidden)]
 pub use coinduction_macro::__next_step;
 
-#[doc(hidden)]
-/// Trait for referencing types with markers
-pub trait TypeRef<const RANDOM: u64, const IX0: usize, const IX: usize, ARG: ?Sized> {
-    type Type: ?Sized;
-}
+/// The [`announce`](https://docs.rs/announce) crate, so that a crate using `#[coinduction]` need
+/// not depend on it: `#[coinduction::announce::announce]`. In a `#[coinduction]` module, the
+/// announcements through this path get `crate = ::coinduction::announce` (with the `coinduction`
+/// argument of the module); elsewhere, write it:
+/// `#[coinduction::announce::announce(crate = ::coinduction::announce)]`.
+pub use announce;
+
+#[cfg(doctest)]
+#[doc = include_str!("README.md")]
+struct ReadmeDoctests;

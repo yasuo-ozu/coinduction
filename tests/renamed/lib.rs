@@ -1,0 +1,83 @@
+//! The announce dependency is renamed to `ann` in `Cargo.toml`, and its attribute is also imported
+//! under another name.
+#![allow(dead_code)]
+use coinduction::coinduction;
+
+#[ann::announce]
+pub trait Count {
+    fn count(&self) -> usize;
+}
+
+#[coinduction]
+pub mod wrappers {
+    #[coinduction]
+    use super::Count;
+    use ann::announce as announced;
+
+    #[ann::announce]
+    pub struct ByPath<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
+
+    impl<T> Count for ByPath<T>
+    where
+        T: Count,
+    {
+        fn count(&self) -> usize {
+            self.0.as_ref().map_or(0, |t| t.count()) + 1
+        }
+    }
+
+    #[announced]
+    pub struct Imported<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
+
+    impl<T> Count for Imported<T>
+    where
+        T: Count,
+    {
+        fn count(&self) -> usize {
+            self.0.as_ref().map_or(0, |t| t.count()) + 3
+        }
+    }
+}
+
+#[coinduction]
+pub mod tree {
+    use super::wrappers::{ByPath, Imported};
+    #[coinduction]
+    use super::Count;
+
+    pub struct Node(pub ByPath<Leaf>, pub Imported<Leaf>);
+    pub struct Leaf(pub Option<Box<Node>>);
+
+    impl Count for Node
+    where
+        ByPath<Leaf>: Count,
+        Imported<Leaf>: Count,
+    {
+        fn count(&self) -> usize {
+            self.0.count() + self.1.count()
+        }
+    }
+
+    impl Count for Leaf
+    where
+        Node: Count,
+    {
+        fn count(&self) -> usize {
+            self.0.as_ref().map_or(0, |n| n.count()) + 1
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tree::{Leaf, Node};
+    use super::wrappers::*;
+    use super::Count;
+
+    #[test]
+    fn renamed() {
+        let node = Node(ByPath(None), Imported(None));
+        assert_eq!(node.count(), 1 + 3);
+        assert_eq!(Leaf(Some(Box::new(node))).count(), 5);
+    }
+}

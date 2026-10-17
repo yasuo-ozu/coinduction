@@ -1,6 +1,7 @@
+use announce::announce;
 use coinduction::*;
 
-#[coinduction]
+#[announce]
 trait Evaluate {
     fn evaluate(&self, input: &[&'static str], index: &mut usize) -> i32;
 }

@@ -44,6 +44,28 @@ fn get_random() -> u64 {
         .finish()
 }
 
+/// The text of `tokens`, to compare paths by. announce writes `crate::` as `$crate::` in what it
+/// sends, so `$crate` is compared as `crate`: within one crate they name the same item.
+fn comparison_key(tokens: &impl ToTokens) -> String {
+    tokens
+        .to_token_stream()
+        .to_string()
+        .replace("$crate", "crate")
+}
+
+/// `tokens` for error messages, closer to how they are written: `a::B<C>`, not `a :: B < C >`.
+fn display(tokens: &impl ToTokens) -> String {
+    let s = format!(" {} ", tokens.to_token_stream());
+    s.replace(" :: ", "::")
+        .replace(" < ", "<")
+        .replace(" <", "<")
+        .replace(" >", ">")
+        .replace(" : ", ": ")
+        .replace("& ", "&")
+        .trim()
+        .to_string()
+}
+
 /// Unwrap TypeGroup/TypeParen which may be introduced during macro expansion
 fn unwrap_type_group(typ: Type) -> Type {
     match typ {
@@ -54,15 +76,12 @@ fn unwrap_type_group(typ: Type) -> Type {
     }
 }
 
-mod kw {
-    syn::custom_keyword!(macro_name);
-}
-
+mod announce_attrs;
 mod coinduction;
 mod matching;
 mod next_step;
+mod rules;
 mod solver;
-mod traitdef;
 mod typedef;
 
 #[proc_macro_error]
@@ -73,19 +92,12 @@ pub fn coinduction(attr: TokenStream, input: TokenStream) -> TokenStream {
             let args = parse_macro_input!(attr as coinduction::ModuleArgs);
             coinduction::coinduction(item, args).into()
         }
-        Item::Trait(item) => {
-            let args = parse_macro_input!(attr as traitdef::TraitDefArgs);
-            traitdef::traitdef(item, args).into()
-        }
-        item => abort!(
-            item,
-            "`#[coinduction]` can only be applied to a `mod` or a `trait`"
-        ),
+        item => abort!(item, "`#[coinduction]` can only be applied to a `mod`"),
     }
 }
 
+#[proc_macro_error]
 #[proc_macro]
 pub fn __next_step(input: TokenStream) -> TokenStream {
-    let args = syn::parse_macro_input!(input as next_step::NextStepArgs);
-    next_step::next_step(args).into()
+    next_step::next_step_macro(input.into()).into()
 }

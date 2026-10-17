@@ -3,7 +3,7 @@
 use coinduction::*;
 use std::fmt::{Display, UpperHex};
 
-#[coinduction((($t1: ty, $t2: ty)) => {$t1: TraitA<S>, $t2: TraitB<S>, S: Display + Default})]
+#[announce::announce(allow_std_prelude = true, meta = coinduction::rules((($t1: ty, $t2: ty)) => {$t1: TraitA<S>, $t2: TraitB<S>, S: Display + Default}))]
 trait TraitA<S> {
     fn get_a(&self) -> String;
 }
@@ -24,7 +24,7 @@ where
     }
 }
 
-#[coinduction((($t1: ty, $t2: ty)) => {$t1: TraitB<S>, $t2: TraitA<S>, S: Display + Default})]
+#[announce::announce(allow_std_prelude = true, meta = coinduction::rules((($t1: ty, $t2: ty)) => {$t1: TraitB<S>, $t2: TraitA<S>, S: Display + Default}))]
 trait TraitB<S> {
     fn get_b(&self) -> String;
 }
@@ -51,6 +51,7 @@ mod typedef_mod {
     #[coinduction]
     use super::{TraitA, TraitB};
 
+    #[announce::announce]
     pub struct TypeA<U>(U);
 
     impl<S, U> TraitA<S> for TypeA<U>
@@ -62,6 +63,7 @@ mod typedef_mod {
         }
     }
 
+    #[announce::announce]
     pub struct TypeB<U>(U);
 
     impl<S, U> TraitB<S> for TypeB<U>
@@ -73,6 +75,7 @@ mod typedef_mod {
         }
     }
 
+    #[announce::announce]
     pub struct Wrapper<T>(T);
 
     impl<T, S> TraitA<S> for Wrapper<T>
@@ -93,7 +96,8 @@ mod typedef_mod {
         }
     }
 
-    pub struct Wrapper2<T, U>(T, core::marker::PhantomData<U>);
+    #[announce::announce]
+    pub struct Wrapper2<T, U>(T, ::core::marker::PhantomData<U>);
 
     // (Wrapper2 < (T2, (T3, (T3, RecD < T1, T2, T3, T4 >))), T4 > : TraitA < S > , T : TraitA < S >),
     impl<T, S, U> TraitA<S> for Wrapper2<T, U>

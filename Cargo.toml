@@ -12,16 +12,18 @@ authors = ["yasuo-ozu"]
 
 [dependencies]
 coinduction-macro = { path = "./macro", version = "0.2.0" }
+announce = "0.2.0"
 
 [dev-dependencies]
 rustversion = "1.0"
 trybuild = "1.0"
 traitdef = { path = "tests/traitdef" }
 typedef = { path = "tests/typedef" }
+reexport = { path = "tests/reexport" }
 
 [lib]
 path = "lib.rs"
 
 [workspace]
-members = ["macro", ".", "tests/traitdef", "tests/typedef"]
+members = ["macro", ".", "tests/traitdef", "tests/typedef", "tests/renamed", "tests/reexport"]
 resolver = "2"

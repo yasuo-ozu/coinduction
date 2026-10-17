@@ -1,7 +1,7 @@
-// A tuple has no macro, so a rule of the trait must match it.
+// A tuple has no announced definition, so a rule of the trait must match it.
 use coinduction::coinduction;
 
-#[coinduction]
+#[announce::announce]
 pub trait Count {
     fn count(&self) -> usize;
 }

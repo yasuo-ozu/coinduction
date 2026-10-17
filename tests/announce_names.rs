@@ -1,5 +1,5 @@
-//! Announce's attribute and derive are recognized in `cfg_attr`, so that the impls of the type are
-//! announced. Other names for them are tested in `tests/renamed`.
+//! Announce's attribute is recognized in `cfg_attr`, so that the impls of the type are announced.
+//! Other names for it are tested in `tests/renamed`.
 #![allow(dead_code)]
 use coinduction::*;
 
@@ -13,11 +13,11 @@ pub mod wrappers {
     #[coinduction]
     use super::Count;
 
-    // The derive in `cfg_attr`: the helper attribute is added under the same condition
-    #[cfg_attr(not(any()), derive(Debug, announce::Announce))]
-    pub struct CfgDerive<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
+    // The attribute in `cfg_attr` with another attribute
+    #[cfg_attr(not(any()), derive(Debug), announce::announce)]
+    pub struct CfgWith<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
 
-    impl<T> Count for CfgDerive<T>
+    impl<T> Count for CfgWith<T>
     where
         T: Count,
     {
@@ -39,8 +39,8 @@ pub mod wrappers {
         }
     }
 
-    // A disabled derive: no helper attribute may be left without it
-    #[cfg_attr(any(), derive(announce::Announce))]
+    // A disabled attribute
+    #[cfg_attr(any(), announce::announce)]
     pub struct Disabled<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
 
     impl<T> Count for Disabled<T>
@@ -55,16 +55,16 @@ pub mod wrappers {
 
 #[coinduction]
 pub mod tree {
-    use super::wrappers::{CfgAttr, CfgDerive};
+    use super::wrappers::{CfgAttr, CfgWith};
     #[coinduction]
     use super::Count;
 
-    pub struct Node(pub CfgDerive<Leaf>, pub CfgAttr<Leaf>);
+    pub struct Node(pub CfgWith<Leaf>, pub CfgAttr<Leaf>);
     pub struct Leaf(pub Option<Box<Node>>);
 
     impl Count for Node
     where
-        CfgDerive<Leaf>: Count,
+        CfgWith<Leaf>: Count,
         CfgAttr<Leaf>: Count,
     {
         fn count(&self) -> usize {
@@ -86,8 +86,8 @@ pub mod tree {
 fn recognized() {
     use tree::{Leaf, Node};
     use wrappers::*;
-    let node = Node(CfgDerive(None), CfgAttr(None));
+    let node = Node(CfgWith(None), CfgAttr(None));
     assert_eq!(node.count(), 3 + 4);
     assert_eq!(Leaf(Some(Box::new(node))).count(), 8);
-    assert_eq!(format!("{:?}", CfgDerive::<u8>(None)), "CfgDerive(None)");
+    assert_eq!(format!("{:?}", CfgWith::<u8>(None)), "CfgWith(None)");
 }

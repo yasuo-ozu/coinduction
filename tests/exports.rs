@@ -62,9 +62,8 @@ pub mod defs {
         }
     }
 
-    // A derive with a renamed trampoline, in its helper attribute
-    #[derive(announce::Announce)]
-    #[announce(macro_name = DMacro)]
+    // A renamed trampoline
+    #[announce::announce(macro_name = DMacro)]
     pub struct D<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
 
     impl<T> Count for D<T>
@@ -108,7 +107,7 @@ pub mod user {
 
     pub struct ViaEnum(pub E<ViaEnum>);
     pub struct ViaUnion(pub U<u8>, pub Option<Box<ViaUnion>>);
-    pub struct ViaDerive(pub D<ViaDerive>);
+    pub struct ViaRenamed(pub D<ViaRenamed>);
     pub struct ViaRules(pub Option<Box<(u8, ViaRules)>>);
     pub struct WithPlain;
     pub struct ViaRef(pub R<'static, ViaRef>);
@@ -132,10 +131,10 @@ pub mod user {
         }
     }
 
-    // ViaDerive -> D<ViaDerive> -> ViaDerive
-    impl Count for ViaDerive
+    // ViaRenamed -> D<ViaRenamed> -> ViaRenamed
+    impl Count for ViaRenamed
     where
-        D<ViaDerive>: Count,
+        D<ViaRenamed>: Count,
     {
         fn count(&self) -> usize {
             self.0.count() + 1
@@ -194,9 +193,9 @@ fn test_union() {
 #[test]
 fn test_derive_macro_name() {
     use defs::D;
-    use user::ViaDerive;
+    use user::ViaRenamed;
 
-    let v = ViaDerive(D(Some(Box::new(ViaDerive(D(None))))));
+    let v = ViaRenamed(D(Some(Box::new(ViaRenamed(D(None))))));
     assert_eq!(v.count(), 4);
 }
 

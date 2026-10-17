@@ -41,7 +41,7 @@ pub mod wrappers {
     }
 
     // Several conditions, and an impl without one
-    #[derive(announce::Announce)]
+    #[announce::announce]
     pub struct Pair<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
 
     impl<T> Count for Pair<T>

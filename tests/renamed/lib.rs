@@ -1,5 +1,5 @@
-//! The announce dependency is renamed to `ann` in `Cargo.toml`, and its attribute and derive are
-//! also imported under other names.
+//! The announce dependency is renamed to `ann` in `Cargo.toml`, and its attribute is also imported
+//! under another name.
 #![allow(dead_code)]
 use coinduction::coinduction;
 
@@ -13,7 +13,6 @@ pub mod wrappers {
     #[coinduction]
     use super::Count;
     use ann::announce as announced;
-    use ann::Announce as Derived;
 
     #[ann::announce]
     pub struct ByPath<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
@@ -24,18 +23,6 @@ pub mod wrappers {
     {
         fn count(&self) -> usize {
             self.0.as_ref().map_or(0, |t| t.count()) + 1
-        }
-    }
-
-    #[derive(ann::Announce)]
-    pub struct DeriveByPath<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
-
-    impl<T> Count for DeriveByPath<T>
-    where
-        T: Count,
-    {
-        fn count(&self) -> usize {
-            self.0.as_ref().map_or(0, |t| t.count()) + 2
         }
     }
 
@@ -50,43 +37,24 @@ pub mod wrappers {
             self.0.as_ref().map_or(0, |t| t.count()) + 3
         }
     }
-
-    #[derive(Derived)]
-    pub struct DeriveImported<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
-
-    impl<T> Count for DeriveImported<T>
-    where
-        T: Count,
-    {
-        fn count(&self) -> usize {
-            self.0.as_ref().map_or(0, |t| t.count()) + 4
-        }
-    }
 }
 
 #[coinduction]
 pub mod tree {
-    use super::wrappers::{ByPath, DeriveByPath, DeriveImported, Imported};
+    use super::wrappers::{ByPath, Imported};
     #[coinduction]
     use super::Count;
 
-    pub struct Node(
-        pub ByPath<Leaf>,
-        pub DeriveByPath<Leaf>,
-        pub Imported<Leaf>,
-        pub DeriveImported<Leaf>,
-    );
+    pub struct Node(pub ByPath<Leaf>, pub Imported<Leaf>);
     pub struct Leaf(pub Option<Box<Node>>);
 
     impl Count for Node
     where
         ByPath<Leaf>: Count,
-        DeriveByPath<Leaf>: Count,
         Imported<Leaf>: Count,
-        DeriveImported<Leaf>: Count,
     {
         fn count(&self) -> usize {
-            self.0.count() + self.1.count() + self.2.count() + self.3.count()
+            self.0.count() + self.1.count()
         }
     }
 
@@ -108,8 +76,8 @@ mod tests {
 
     #[test]
     fn renamed() {
-        let node = Node(ByPath(None), DeriveByPath(None), Imported(None), DeriveImported(None));
-        assert_eq!(node.count(), 1 + 2 + 3 + 4);
-        assert_eq!(Leaf(Some(Box::new(node))).count(), 11);
+        let node = Node(ByPath(None), Imported(None));
+        assert_eq!(node.count(), 1 + 3);
+        assert_eq!(Leaf(Some(Box::new(node))).count(), 5);
     }
 }

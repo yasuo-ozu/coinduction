@@ -14,9 +14,9 @@
 ///   foreign types) are given as `META`:
 ///   `#[announce(meta = coinduction::rules((<pattern>) => { <predicates> }, ...))]`, where
 ///   `<pattern>` is a `macro_rules!` pattern matched against the type.
-/// - A struct, enum or union in a `#[coinduction]` module that is announced, with `#[announce]` or
-///   `#[derive(Announce)]`, carries the predicates of its impls in its announcement, so that other
-///   `#[coinduction]` modules can see through bounds on it.
+/// - A struct, enum or union in a `#[coinduction]` module that is announced, with `#[announce]`,
+///   carries the predicates of its impls in its announcement, so that other `#[coinduction]`
+///   modules can see through bounds on it.
 ///
 /// `#[coinduction]` modules look up the trampolines by the trait or type name, so a trampoline
 /// renamed with `#[announce(macro_name = ...)]` must be imported under that name where the trait
@@ -27,9 +27,8 @@ pub use coinduction_macro::coinduction;
 pub use coinduction_macro::__next_step;
 
 /// The [`announce`](https://docs.rs/announce) crate, so that a crate using `#[coinduction]` need
-/// not depend on it: `#[coinduction::announce::announce]`,
-/// `#[derive(coinduction::announce::Announce)]`. In a `#[coinduction]` module, the announcements
-/// of types through this path get `crate = ::coinduction::announce` (with the `coinduction`
+/// not depend on it: `#[coinduction::announce::announce]`. In a `#[coinduction]` module, the
+/// announcements through this path get `crate = ::coinduction::announce` (with the `coinduction`
 /// argument of the module); elsewhere, write it:
 /// `#[coinduction::announce::announce(crate = ::coinduction::announce)]`.
 pub use announce;

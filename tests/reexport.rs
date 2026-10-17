@@ -5,18 +5,18 @@ use coinduction::coinduction;
 
 #[coinduction]
 pub mod cycle {
-    use reexport::wrappers::{ByPath, CrateAlias, CrateAliasMacro as CrateAlias, DeriveImported};
+    use reexport::wrappers::{ByPath, CrateAlias, CrateAliasMacro as CrateAlias, Imported};
     #[coinduction]
     use reexport::Count;
 
     // Through the announced types
-    pub struct Node(pub ByPath<Leaf>, pub DeriveImported<Leaf>, pub CrateAlias<Leaf>);
+    pub struct Node(pub ByPath<Leaf>, pub Imported<Leaf>, pub CrateAlias<Leaf>);
     pub struct Leaf(pub Option<Box<Node>>);
 
     impl Count for Node
     where
         ByPath<Leaf>: Count,
-        DeriveImported<Leaf>: Count,
+        Imported<Leaf>: Count,
         CrateAlias<Leaf>: Count,
     {
         fn count(&self) -> usize {
@@ -79,7 +79,7 @@ fn reexport() {
     use cycle::{Leaf, List, Node};
     use reexport::wrappers::*;
     use reexport::Count;
-    let node = Node(ByPath(None), DeriveImported(None), CrateAlias(None));
+    let node = Node(ByPath(None), Imported(None), CrateAlias(None));
     assert_eq!(node.count(), 1 + 2 + 3);
     assert_eq!(Leaf(Some(Box::new(node))).count(), 7);
     assert_eq!(List(Some(Box::new((1, List(None))))).count(), 1);

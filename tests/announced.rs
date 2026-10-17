@@ -23,13 +23,13 @@ pub mod rule_cycle {
     }
 }
 
-// A type announced with `#[derive(Announce)]` instead of `#[announce]`.
+// A type announced in a `#[coinduction]` module.
 #[coinduction]
-pub mod derived {
+pub mod wrapper {
     #[coinduction]
     use traitdef::Size;
 
-    #[derive(announce::Announce)]
+    #[announce::announce]
     pub struct Boxed<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
 
     impl<T> Size for Boxed<T>
@@ -45,8 +45,8 @@ pub mod derived {
 // `Boxed<Node>: Size` resolves through the impls of `Boxed` in the other module, back to
 // `Node: Size`.
 #[coinduction]
-pub mod derived_user {
-    use super::derived::Boxed;
+pub mod wrapper_user {
+    use super::wrapper::Boxed;
     #[coinduction]
     use traitdef::Size;
 
@@ -72,9 +72,9 @@ fn test_rule_cycle() {
 }
 
 #[test]
-fn test_derived() {
-    use derived::Boxed;
-    use derived_user::Node;
+fn test_announced_type() {
+    use wrapper::Boxed;
+    use wrapper_user::Node;
 
     let node = Node(Boxed(Some(Box::new(Node(Boxed(None))))));
     assert_eq!(node.size(), 2);

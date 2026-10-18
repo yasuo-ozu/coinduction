@@ -332,7 +332,12 @@ fn apply(args: &mut NextStepArgs, step: Step) {
             trait_path: target.trait_path.clone(),
         };
         let (working_traits, trait_aliases) = (&args.working_traits, &args.trait_aliases);
-        let rules = crate::solver::rules(&args.target_impls, |t| args.working_traits.contains(t));
+        let is_working = |t: &NoArgPath| {
+            working_traits
+                .iter()
+                .any(|wt| crate::comparison_key(wt) == crate::comparison_key(t))
+        };
+        let rules = crate::solver::rules(&args.target_impls, is_working);
         for solver in args.solvers.iter_mut().filter_map(Option::as_mut) {
             // New constraints on types of the module, followed through the impls of the module
             let mut module_constraints = Vec::new();
@@ -500,9 +505,9 @@ fn apply(args: &mut NextStepArgs, step: Step) {
                     }
                 }
             });
-            for constraint in solver.expand(&module_constraints, &rules, &args.ignore_tys, |t| {
-                args.working_traits.contains(t)
-            }) {
+            for constraint in
+                solver.expand(&module_constraints, &rules, &args.ignore_tys, is_working)
+            {
                 if !args.working_list.contains(&constraint) {
                     args.working_list.push_back(constraint);
                 }

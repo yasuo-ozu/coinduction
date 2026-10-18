@@ -341,7 +341,13 @@ pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
             .filter_map(|ItemImpl { trait_, .. }| trait_.as_ref().map(|t| remove_path_args(&t.1)))
             .collect()
     };
-    let rewrite_rules = crate::solver::rules(&target_impls, |t| working_traits.contains(t));
+    // As `apply` compares the traits of the answers: `$crate` as `crate`
+    let is_working = |t: &NoArgPath| {
+        working_traits
+            .iter()
+            .any(|wt| crate::comparison_key(wt) == crate::comparison_key(t))
+    };
+    let rewrite_rules = crate::solver::rules(&target_impls, is_working);
     let mut working_list = HashSet::new();
     // Iterate items in the module, and generate Ident list of the struct/enum/unions
     let ignore_tys: HashSet<Ident> = module
@@ -372,11 +378,12 @@ pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
                 generic_params: item_impl.generics.params.iter().cloned().collect(),
             };
 
-            working_list.extend(
-                solver.expand(&[constraint], &rewrite_rules, &ignore_tys, |t| {
-                    working_traits.contains(t)
-                }),
-            );
+            working_list.extend(solver.expand(
+                &[constraint],
+                &rewrite_rules,
+                &ignore_tys,
+                is_working,
+            ));
             Some(solver)
         })
         .collect();

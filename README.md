@@ -187,63 +187,114 @@ A type announced in a `#[coinduction]` module can be used in the bounds of anoth
 ```rust
 # use announce::announce;
 # use coinduction::*;
+# use std::marker::PhantomData;
+
 #[announce]
-pub trait Count {
-    fn count(&self) -> usize;
+trait ProcessData {
+    fn process(&self) -> ::std::string::String;
 }
 
+// Base implementation for simple types to break the infinite recursion
+// (outside the modules: they implement traits only for their own types)
+impl ProcessData for String {
+    fn process(&self) -> String {
+        format!("String: {}", self)
+    }
+}
+
+// First define generic types in a #[coinduction] module
 #[coinduction]
-pub mod wrappers {
+mod data_types {
     #[coinduction]
-    use super::Count;
+    use super::ProcessData;
     use announce::announce;
 
+    // Announced, with paths that resolve in other crates
     #[announce]
-    pub struct Boxed<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
+    pub struct DataStruct<T> {
+        pub value: ::std::string::String,
+        pub phantom: ::core::marker::PhantomData<T>,
+    }
 
-    impl<T> Count for Boxed<T>
+    // ProcessData impl for DataStruct when T: ProcessData
+    impl<T> ProcessData for DataStruct<T>
     where
-        T: Count,
+        T: ProcessData,
     {
-        fn count(&self) -> usize {
-            self.0.as_ref().map_or(0, |t| t.count()) + 1
+        fn process(&self) -> String {
+            format!("DataStruct({})", self.value)
         }
     }
 }
 
+// Then use #[coinduction] to implement cyclic induction with T position circularity
 #[coinduction]
-pub mod tree {
-    use super::wrappers::Boxed;
+mod circular_impls {
+    # use std::marker::PhantomData;
     #[coinduction]
-    use super::Count;
+    use super::ProcessData;
+    use super::data_types::DataStruct;
 
-    pub struct Node(pub Boxed<Leaf>);
-    pub struct Leaf(pub Option<Box<Node>>);
+    // Cyclic induction with constraints using DataStruct<T>
+    // where the circular dependency occurs in the T position
+    pub struct CyclicA<T> {
+        pub data: DataStruct<T>,
+    }
+    
+    pub struct CyclicB<T> {
+        pub value: String,
+        pub phantom: PhantomData<T>,
+    }
 
-    // Node -> Boxed<Leaf> -> Leaf -> Node
-    impl Count for Node
+    // CyclicA implementation with circular dependency in T position
+    impl<T> ProcessData for CyclicA<T>
     where
-        Boxed<Leaf>: Count,
+        T: Clone,
+        DataStruct<CyclicB<T>>: ProcessData,  // Circular dependency in T position
     {
-        fn count(&self) -> usize {
-            self.0.count() + 1
+        fn process(&self) -> String {
+            format!("CyclicA with DataStruct: {}", self.data.value)
         }
     }
 
-    impl Count for Leaf
+    // CyclicB implementation with circular dependency in T position  
+    impl<T> ProcessData for CyclicB<T>
     where
-        Node: Count,
+        T: Clone,
+        DataStruct<CyclicA<T>>: ProcessData,  // Circular dependency in T position
     {
-        fn count(&self) -> usize {
-            self.0.as_ref().map_or(0, |n| n.count()) + 1
+        fn process(&self) -> String {
+            format!("CyclicB: {}", self.value)
         }
     }
 }
-# fn main() {}
-```
 
-Announced items are used in other crates, so they need paths that resolve there, such as
-`::core::option::Option` (see the [`announce` documentation](https://docs.rs/announce)).
+# fn main() {
+// Example usage:
+// Test with simple type
+let data = data_types::DataStruct::<String> {
+    value: "hello".to_string(),
+    phantom: PhantomData,
+};
+assert_eq!(data.process(), "DataStruct(hello)");
+
+// Test cyclic structures using the coinduction module  
+let cyclic_a = circular_impls::CyclicA {
+    data: data_types::DataStruct::<String> {
+        value: "cyclic".to_string(),
+        phantom: PhantomData,
+    },
+};
+assert_eq!(cyclic_a.process(), "CyclicA with DataStruct: cyclic");
+
+let cyclic_b = circular_impls::CyclicB::<String> {
+    value: "test".to_string(),
+    phantom: PhantomData,
+};
+assert_eq!(cyclic_b.process(), "CyclicB: test");
+// Note: This demonstrates cyclic induction with DataStruct<T> in T position
+# }
+```
 
 ## Attribute Arguments
 

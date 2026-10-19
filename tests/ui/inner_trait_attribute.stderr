@@ -1,5 +1,5 @@
 error: `#[coinduction]` in a `#[coinduction]` module can only be applied to `use` items
- --> tests/ui/inner_trait_attribute.rs:7:5
+ --> ui/inner_trait_attribute.rs:7:5
   |
 7 | /     pub trait Count {
 8 | |         fn count(&self) -> usize;

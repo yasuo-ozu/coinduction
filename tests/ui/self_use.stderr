@@ -1,5 +1,5 @@
 error: `self` imports cannot be marked with `#[coinduction]`
- --> tests/ui/self_use.rs:7:20
+ --> ui/self_use.rs:7:20
   |
 7 |     use std::fmt::{self};
   |                    ^^^^

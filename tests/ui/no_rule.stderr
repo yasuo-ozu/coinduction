@@ -1,5 +1,5 @@
 error: coinduction: no rule of the trait `Count` matches `(u8, u8)`, and the type has no announced definition
-  --> tests/ui/no_rule.rs:18:9
+  --> ui/no_rule.rs:18:9
    |
 18 |         (u8, u8): Count,
    |         ^^^^^^^^

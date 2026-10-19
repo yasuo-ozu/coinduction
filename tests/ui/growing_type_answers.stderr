@@ -1,6 +1,6 @@
 error: coinduction: `G < Wrap < Wrap < Wrap < Wrap < Wrap < Wrap < Wrap < Wrap < T > > > > > > > >
        > : Count` grows without end through the impls
-  --> tests/ui/growing_type_answers.rs:38:14
+  --> ui/growing_type_answers.rs:38:14
    |
 38 |         Wrap<G<Wrap<T>>>: Count,
    |              ^^^^^^^^^^

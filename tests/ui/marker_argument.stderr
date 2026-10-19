@@ -1,5 +1,5 @@
 error: `marker` is no longer needed: the impls of announced types are announced as written
- --> tests/ui/marker_argument.rs:6:15
+ --> ui/marker_argument.rs:6:15
   |
 6 | #[coinduction(marker = super::M)]
   |               ^^^^^^

@@ -1,5 +1,5 @@
 error: arguments are not supported on `#[coinduction] use`
-  --> tests/ui/use_arguments.rs:11:5
+  --> ui/use_arguments.rs:11:5
    |
 11 |     #[coinduction(macro_name = X)]
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

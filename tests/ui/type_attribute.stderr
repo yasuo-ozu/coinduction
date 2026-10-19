@@ -1,5 +1,5 @@
 error: `#[coinduction]` in a `#[coinduction]` module can only be applied to `use` items
-  --> tests/ui/type_attribute.rs:15:5
+  --> ui/type_attribute.rs:15:5
    |
 15 |     pub struct S;
    |     ^^^^^^^^^^^^^

@@ -130,20 +130,28 @@ impl Parse for ModuleArgs {
     }
 }
 
-/// Whether `attrs` has a `#[cfg(...)]` attribute.
-fn has_cfg(attrs: &[Attribute]) -> bool {
-    attrs.iter().any(|attr| attr.path().is_ident("cfg"))
+/// Whether `item` is an impl of a trait the module works on with a `#[cfg(...)]` attribute.
+fn is_conditional(item: &Item, is_working: impl Fn(&NoArgPath) -> bool) -> bool {
+    matches!(item, Item::Impl(ItemImpl { attrs, trait_: Some((_, path, _)), .. })
+        if attrs.iter().any(|attr| attr.path().is_ident("cfg"))
+            && is_working(&remove_path_args(path)))
 }
 
-/// Evaluate the `#[cfg(...)]` attributes of the impls in `module`, and apply `#[coinduction]`
-/// again to the module with the impls that exist. An attribute macro sees the impls that a `cfg`
-/// removes, and they would take part in the resolution and the announced impls.
+/// Evaluate the `#[cfg(...)]` attributes of the impls of the working traits in `module`, and apply
+/// `#[coinduction]` again to the module with the impls that exist. An attribute macro sees the
+/// impls that a `cfg` removes, and they would take part in the resolution and the announced impls.
+/// Other items keep their `cfg`s, for rustc to evaluate.
 ///
-/// The `cfg`s are evaluated by a chain of `macro_rules!`, one for each conditional impl: the
+/// The `cfg`s are evaluated by a chain of `macro_rules!`, one for each conditional impl, each one
+/// a level of macro expansion against the recursion limit: the
 /// definition under `#[cfg(P)]` adds the impl to the list it passes on, and the one under
 /// `#[cfg(not(P))]` drops it. The last one emits the module. The items are passed as input, so
 /// that `$` in them is not read by the chain.
-fn eval_cfg_impls(module: ItemMod, args: &ModuleArgs) -> TokenStream {
+fn eval_cfg_impls(
+    module: ItemMod,
+    args: &ModuleArgs,
+    is_working: impl Fn(&NoArgPath) -> bool,
+) -> TokenStream {
     let random = crate::get_random();
     let name = |ix: usize| {
         Ident::new(
@@ -166,7 +174,7 @@ fn eval_cfg_impls(module: ItemMod, args: &ModuleArgs) -> TokenStream {
         .map_or(&[][..], |(_, items)| items)
         .iter()
         .cloned()
-        .partition(|item| matches!(item, Item::Impl(item_impl) if has_cfg(&item_impl.attrs)));
+        .partition(|item| is_conditional(item, &is_working));
     let conditional = conditional
         .into_iter()
         .map(|item| {
@@ -236,13 +244,6 @@ fn eval_cfg_impls(module: ItemMod, args: &ModuleArgs) -> TokenStream {
 }
 
 pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
-    if module.content.as_ref().is_some_and(|(_, items)| {
-        items
-            .iter()
-            .any(|item| matches!(item, Item::Impl(item_impl) if has_cfg(&item_impl.attrs)))
-    }) {
-        return eval_cfg_impls(module, &args);
-    }
     // Traits marked with `#[coinduction] use ...;` or announced in the module
     let mut marked_traits = HashSet::new();
     // Types announced in the module: their announcements carry the predicates of their impls
@@ -347,6 +348,13 @@ pub fn coinduction(module: ItemMod, args: ModuleArgs) -> TokenStream {
             .iter()
             .any(|wt| crate::comparison_key(wt) == crate::comparison_key(t))
     };
+    if module
+        .content
+        .as_ref()
+        .is_some_and(|(_, items)| items.iter().any(|item| is_conditional(item, is_working)))
+    {
+        return eval_cfg_impls(module, &args, is_working);
+    }
     let rewrite_rules = crate::solver::rules(&target_impls, is_working);
     let mut working_list = HashSet::new();
     // Iterate items in the module, and generate Ident list of the struct/enum/unions

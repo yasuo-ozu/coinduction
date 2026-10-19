@@ -1,5 +1,5 @@
 //! Announce's attribute is recognized in `cfg_attr` and among other attributes, so that the impls of
-//! the type are announced. Other names for it are tested in `tests/renamed`.
+//! the type are announced. Other names for it are tested in `tests/reexport`.
 #![allow(dead_code)]
 use coinduction::*;
 

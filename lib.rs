@@ -31,6 +31,11 @@ pub use coinduction_macro::__next_step;
 /// announcements through this path get `crate = ::coinduction::announce` (with the `coinduction`
 /// argument of the module); elsewhere, write it:
 /// `#[coinduction::announce::announce(crate = ::coinduction::announce)]`.
+///
+/// A `#[coinduction]` module recognizes announce's attribute under the name `announce` or through
+/// this path (also imported under other names), not under a name given to announce in
+/// `Cargo.toml` (`ann = { package = "announce", .. }`): with such a rename, announce through this
+/// path.
 pub use announce;
 
 #[cfg(doctest)]

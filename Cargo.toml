@@ -25,5 +25,5 @@ reexport = { path = "tests/reexport" }
 path = "lib.rs"
 
 [workspace]
-members = ["macro", ".", "tests/traitdef", "tests/typedef", "tests/renamed", "tests/reexport"]
+members = ["macro", ".", "tests/traitdef", "tests/typedef", "tests/reexport"]
 resolver = "2"

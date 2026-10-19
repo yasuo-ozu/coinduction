@@ -12,9 +12,11 @@ use crate::NoArgPath;
 
 /// How the module names announce's crate and attribute macro.
 ///
-/// A path names the attribute macro when it is `<announce>::announce`, `<announce>` being the name
-/// of the announce dependency in the crate's `Cargo.toml` (renames included) or a name the module
-/// imports `<coinduction>::announce` as, or when it is `<coinduction>::announce::announce`. A
+/// A path names the attribute macro when it is `<announce>::announce`, `<announce>` being
+/// `announce` or a name the module imports `<coinduction>::announce` as, or when it is
+/// `<coinduction>::announce::announce`. A dependency on announce renamed in `Cargo.toml` is not
+/// recognized: the manifest is not read, as a crate may be compiled with another one (a subcrate,
+/// with that of the package around it), and the re-export names announce for every crate. A
 /// single name does when the module imports it from there, also under another name, or when the
 /// module does not import that name from another crate (it may come from a glob import or from an
 /// outer module). Attributes inside `#[cfg_attr(..)]` count too.
@@ -56,17 +58,12 @@ fn imports(tree: &UseTree, prefix: &mut Vec<Ident>, out: &mut Vec<(Vec<Ident>, I
 
 impl AnnounceNames {
     pub(crate) fn new(items: &[Item], coinduction: &NoArgPath) -> Self {
-        let krate = announce::machinery::Options::default().krate();
-        let span = proc_macro2::Span::call_site();
+        let announce = Ident::new("announce", proc_macro2::Span::call_site());
         let mut this = AnnounceNames {
             coinduction: coinduction.clone(),
             names: vec![
-                (
-                    "crate".into(),
-                    krate.segments.last().unwrap().ident.clone(),
-                    false,
-                ),
-                ("announce".into(), Ident::new("announce", span), false),
+                ("crate".into(), announce.clone(), false),
+                ("announce".into(), announce, false),
             ],
         };
         let mut uses = Vec::new();
@@ -262,6 +259,8 @@ mod tests {
         }
         for attrs in [
             "#[my::announce]",
+            // A renamed dependency
+            "#[ann::announce]",
             "#[a::announce::announce]",
             "#[announce::other]",
             "#[other::announce::announce]",

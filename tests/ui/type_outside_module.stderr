@@ -2,7 +2,7 @@ error: coinduction: `super::Outside` is announced without its impls: it is not i
 
          = help: announce the type in a `#[coinduction]` module as `#[announce]`, `#[announce::announce]` or `#[coinduction::announce::announce]`, or give the trait a rule for it with `#[announce(meta = coinduction::rules(...))]`
 
-  --> tests/ui/type_outside_module.rs:21:9
+  --> ui/type_outside_module.rs:21:9
    |
 21 |         super::Outside: Count,
    |         ^^^^^^^^^^^^^^

@@ -1,5 +1,5 @@
 error: `#[coinduction]` can only be applied to a `mod`
- --> tests/ui/not_a_module.rs:4:1
+ --> ui/not_a_module.rs:4:1
   |
 4 | fn f() {}
   | ^^^^^^^^^

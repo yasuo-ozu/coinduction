@@ -1,11 +1,11 @@
 error: cannot find macro `Count` in this scope
-  --> tests/ui/unannounced_trait.rs:17:13
+  --> ui/unannounced_trait.rs:17:13
    |
 17 |         u8: Count,
    |             ^^^^^
    |
 note: `Count` is imported here, but it is a trait, not a macro
-  --> tests/ui/unannounced_trait.rs:11:9
+  --> ui/unannounced_trait.rs:11:9
    |
 11 |     use super::Count;
    |         ^^^^^^^^^^^^

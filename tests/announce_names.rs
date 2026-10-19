@@ -1,5 +1,6 @@
-//! Announce's attribute is recognized in `cfg_attr` and among other attributes, so that the impls of
-//! the type are announced. Other names for it are tested in `tests/reexport`.
+//! Announce's attribute is recognized in `cfg_attr`, among other attributes, through announce
+//! imported under another name and through a re-export in this crate, so that the impls of the type
+//! are announced. Other names for it are tested in `tests/reexport`.
 #![allow(dead_code)]
 use coinduction::*;
 
@@ -8,8 +9,13 @@ pub trait Count {
     fn count(&self) -> usize;
 }
 
+pub mod reexports {
+    pub use announce::announce;
+}
+
 #[coinduction]
 pub mod wrappers {
+    use announce as my;
     #[coinduction]
     use super::Count;
 
@@ -67,6 +73,32 @@ pub mod wrappers {
         }
     }
 
+    // Announce imported under another name
+    #[my::announce]
+    pub struct Aliased<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
+
+    impl<T> Count for Aliased<T>
+    where
+        T: Count,
+    {
+        fn count(&self) -> usize {
+            self.0.as_ref().map_or(0, |t| t.count()) + 7
+        }
+    }
+
+    // A re-export in this crate
+    #[crate::reexports::announce]
+    pub struct Reexported<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
+
+    impl<T> Count for Reexported<T>
+    where
+        T: Count,
+    {
+        fn count(&self) -> usize {
+            self.0.as_ref().map_or(0, |t| t.count()) + 8
+        }
+    }
+
     // A disabled attribute
     #[cfg_attr(any(), announce::announce)]
     pub struct Disabled<T>(pub ::core::option::Option<::std::boxed::Box<T>>);
@@ -83,7 +115,7 @@ pub mod wrappers {
 
 #[coinduction]
 pub mod tree {
-    use super::wrappers::{CfgAttr, CfgWith, Merged, Runner};
+    use super::wrappers::{Aliased, CfgAttr, CfgWith, Merged, Reexported, Runner};
     #[coinduction]
     use super::Count;
 
@@ -92,6 +124,8 @@ pub mod tree {
         pub CfgAttr<Leaf>,
         pub Merged<Leaf>,
         pub Runner<Leaf>,
+        pub Aliased<Leaf>,
+        pub Reexported<Leaf>,
     );
     pub struct Leaf(pub Option<Box<Node>>);
 
@@ -101,9 +135,12 @@ pub mod tree {
         CfgAttr<Leaf>: Count,
         Merged<Leaf>: Count,
         Runner<Leaf>: Count,
+        Aliased<Leaf>: Count,
+        Reexported<Leaf>: Count,
     {
         fn count(&self) -> usize {
-            self.0.count() + self.1.count() + self.2.count() + self.3.count()
+            let Node(a, b, c, d, e, f) = self;
+            a.count() + b.count() + c.count() + d.count() + e.count() + f.count()
         }
     }
 
@@ -121,8 +158,15 @@ pub mod tree {
 fn recognized() {
     use tree::{Leaf, Node};
     use wrappers::*;
-    let node = Node(CfgWith(None), CfgAttr(None), Merged(None), Runner(None));
-    assert_eq!(node.count(), 3 + 4 + 5 + 6);
-    assert_eq!(Leaf(Some(Box::new(node))).count(), 19);
+    let node = Node(
+        CfgWith(None),
+        CfgAttr(None),
+        Merged(None),
+        Runner(None),
+        Aliased(None),
+        Reexported(None),
+    );
+    assert_eq!(node.count(), 3 + 4 + 5 + 6 + 7 + 8);
+    assert_eq!(Leaf(Some(Box::new(node))).count(), 34);
     assert_eq!(format!("{:?}", CfgWith::<u8>(None)), "CfgWith(None)");
 }

@@ -701,9 +701,9 @@ pub fn next_step_macro(input: TokenStream) -> TokenStream {
             else {
                 abort!(
                     target.typ,
-                    "coinduction: `{}` is announced, but not in a `#[coinduction]` module, so its impls are unknown",
+                    "coinduction: `{}` is announced without its impls: it is not in a `#[coinduction]` module, or the module does not recognize the path of its `#[announce]`",
                     crate::display(&target.typ);
-                    help = "move the type into a `#[coinduction]` module, or give the trait a rule for it with `#[announce(meta = coinduction::rules(...))]`"
+                    help = "announce the type in a `#[coinduction]` module as `#[announce]`, `#[announce::announce]` or `#[coinduction::announce::announce]`, or give the trait a rule for it with `#[announce(meta = coinduction::rules(...))]`"
                 )
             };
             let Impls(predicates) = meta

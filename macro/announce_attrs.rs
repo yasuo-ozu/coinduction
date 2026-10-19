@@ -13,13 +13,15 @@ use crate::NoArgPath;
 /// How the module names announce's crate and attribute macro.
 ///
 /// A path names the attribute macro when it is `<announce>::announce`, `<announce>` being
-/// `announce` or a name the module imports `<coinduction>::announce` as, or when it is
+/// `announce` or a name the module imports it or `<coinduction>::announce` as, or when it is
 /// `<coinduction>::announce::announce`. A dependency on announce renamed in `Cargo.toml` is not
 /// recognized: the manifest is not read, as a crate may be compiled with another one (a subcrate,
 /// with that of the package around it), and the re-export names announce for every crate. A
 /// single name does when the module imports it from there, also under another name, or when the
 /// module does not import that name from another crate (it may come from a glob import or from an
-/// outer module). Attributes inside `#[cfg_attr(..)]` count too.
+/// outer module). So does a path ending in `announce` through this crate, which may re-export it:
+/// one starting with `crate` or `super`, or with a module declared in the module or imported from
+/// these. `self::<path>` names what `<path>` does. Attributes inside `#[cfg_attr(..)]` count too.
 pub struct AnnounceNames {
     coinduction: NoArgPath,
     /// `(item, name, via)`: `item` is `crate` or `announce`, and `via` whether it is
@@ -27,6 +29,8 @@ pub struct AnnounceNames {
     /// announcement is given `crate = <coinduction>::announce`, so that the crate need not depend
     /// on announce.
     names: Vec<(String, Ident, bool)>,
+    /// The modules declared in the module, and the names it imports from this crate
+    locals: Vec<Ident>,
 }
 
 /// The imports of `tree`: the imported path, and the name it is imported as.
@@ -65,17 +69,31 @@ impl AnnounceNames {
                 ("crate".into(), announce.clone(), false),
                 ("announce".into(), announce, false),
             ],
+            locals: Vec::new(),
         };
         let mut uses = Vec::new();
         for item in items {
-            if let Item::Use(item_use) = item {
-                imports(&item_use.tree, &mut Vec::new(), &mut uses);
+            match item {
+                Item::Use(item_use) => imports(&item_use.tree, &mut Vec::new(), &mut uses),
+                Item::ExternCrate(ItemExternCrate {
+                    ident,
+                    rename: Some((_, rename)),
+                    ..
+                }) => uses.push((vec![ident.clone()], rename.clone())),
+                Item::Mod(item_mod) => this.locals.push(item_mod.ident.clone()),
+                _ => {}
             }
         }
-        // The names of the crate first: `use coinduction::announce as ann; use ann::announce;`
+        // The names of the crate first: `use coinduction::announce as ann; use ann::announce;`,
+        // `use announce as my;`
         for (path, name) in &uses {
-            if this.is_reexport(path, &[]) {
-                this.names.push(("crate".into(), name.clone(), true));
+            let via = match &path[..] {
+                _ if this.is_reexport(path, &[]) => Some(true),
+                [krate] => this.lookup("crate", krate),
+                _ => None,
+            };
+            if let Some(via) = via {
+                this.names.push(("crate".into(), name.clone(), via));
             }
         }
         let mut foreign = Vec::new();
@@ -91,12 +109,14 @@ impl AnnounceNames {
             match from {
                 Some(via) if announce => this.names.push((item, name.clone(), via)),
                 _ if this.is_reexport(path, &[]) => {}
+                _ if prefix.is_empty() && this.lookup("crate", &path[0]).is_some() => {}
                 _ if prefix.first().is_some_and(|first| {
                     first != "crate" && first != "self" && first != "super"
                 }) =>
                 {
                     foreign.push(name.clone())
                 }
+                _ if !prefix.is_empty() && !announce => this.locals.push(name.clone()),
                 // A re-export in this crate: it may be announce's
                 _ if announce => this.names.push((item, name.clone(), false)),
                 _ => {}
@@ -135,10 +155,25 @@ impl AnnounceNames {
             .iter()
             .map(|seg| seg.ident.clone())
             .collect::<Vec<_>>();
-        match &segments[..] {
+        let segments = match &segments[..] {
+            [first, rest @ ..] if first == "self" && !rest.is_empty() => rest,
+            segments => segments,
+        };
+        let local =
+            |first: &Ident| first == "crate" || first == "super" || self.locals.contains(first);
+        match segments {
             [name] if path.leading_colon.is_none() => self.lookup("announce", name),
-            [krate, last] if last == "announce" => self.lookup("crate", krate),
-            _ => self.is_reexport(&segments, &["announce"]).then_some(true),
+            [krate, last] if last == "announce" && self.lookup("crate", krate).is_some() => {
+                self.lookup("crate", krate)
+            }
+            _ if self.is_reexport(segments, &["announce"]) => Some(true),
+            // A re-export in this crate: it may be announce's
+            [first, .., last]
+                if last == "announce" && path.leading_colon.is_none() && local(first) =>
+            {
+                Some(false)
+            }
+            _ => None,
         }
     }
 
@@ -292,6 +327,59 @@ mod tests {
         // Re-exported in this crate, or from a glob import: may be announce's
         let n = names(&["use super::announce;", "use crate::*;"]);
         assert!(announced(&n, "#[announce]"));
+    }
+
+    #[test]
+    fn local_paths() {
+        let n = names(&[
+            "use announce as my;",
+            "extern crate announce as ext;",
+            "use crate::reexports;",
+            "use super::m as r;",
+            "mod sub;",
+            "use coinduction::announce as c;",
+            "use c as d;",
+        ]);
+        for attrs in [
+            // Announce's crate under other names
+            "#[my::announce]",
+            "#[ext::announce]",
+            "#[self::my::announce]",
+            "#[d::announce]",
+            // Re-exports in this crate
+            "#[crate::reexports::announce]",
+            "#[reexports::announce]",
+            "#[super::announce]",
+            "#[super::m::announce]",
+            "#[r::announce]",
+            "#[sub::announce]",
+            "#[self::sub::announce]",
+            "#[self::announce]",
+        ] {
+            assert!(announced(&n, attrs), "{}", attrs);
+        }
+        for attrs in [
+            "#[my]",
+            "#[other::announce]",
+            "#[::reexports::announce]",
+            "#[crate::reexports::other]",
+            "#[self::other]",
+        ] {
+            assert!(!announced(&n, attrs), "{}", attrs);
+        }
+        for (attrs, expected) in [
+            ("#[my::announce]", "#[my::announce(meta=m,)]"),
+            (
+                "#[d::announce]",
+                "#[d::announce(crate=::coinduction::announce,meta=m,)]",
+            ),
+            (
+                "#[crate::reexports::announce]",
+                "#[crate::reexports::announce(meta=m,)]",
+            ),
+        ] {
+            assert_eq!(add(&n, attrs), expected);
+        }
     }
 
     #[test]
